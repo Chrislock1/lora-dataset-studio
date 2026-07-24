@@ -162,6 +162,13 @@ DEFAULTS = {
               # Optional instruction for small scraped-image rescue only.
               # Empty is intentional: never invent a restoration prompt for the user.
               'small_image_prompt': '',
+              # Sampler steps for Klein GENERATION (variations, regenerate, small-image
+              # rescue). 5 = the value hardcoded in the shipped workflow (node 77), so an
+              # untouched install renders exactly as before. More steps = slower, usually
+              # a cleaner render; clamped to 50 (face_dataset_service._IMPROVE_MAX_STEPS).
+              # Raised on request by ashish.sinha (Discord). Separate from improve_steps,
+              # which drives the manual "Upscale & improve" pass only.
+              'generation_steps': 5,
               # Manual "Upscale & improve" quality profile. Its INSTRUCTION was
               # already editable (identity_prompts.klein_improve) but the knobs
               # deciding how much the pass actually changes were hardcoded at the
@@ -196,8 +203,16 @@ DEFAULTS = {
     #   klein_improve  — the fixed "Klein upscale & improve" instruction
     # klein_improve_enabled (default True): when False the manual "Klein upscale &
     # improve" applies NO prompt at all (pure upscale), instead of the default/override.
+    # The four flat keys above are the HUMAN overrides and keep their historical
+    # names/meaning (never renamed — they are in user config files since the feature
+    # shipped). `by_subject` holds the non-human ones,
+    # {animal|creature|object|other: {face_single|face_multi|klein_identity: text}},
+    # each read with NO fallback to the flat key: an override written on an Animal
+    # dataset must never ride on a human generation (reported by ashish.sinha).
+    # Empty by default — a subject with no entry follows its shipped default.
     'identity_prompts': {'face_single': '', 'face_multi': '', 'klein_identity': '',
-                         'klein_improve': '', 'klein_improve_enabled': True},
+                         'klein_improve': '', 'klein_improve_enabled': True,
+                         'by_subject': {}},
     'updates': {'repo': 'perfectgf/lora-dataset-studio'},      # GitHub repo for the release feed
 }
 

@@ -103,9 +103,23 @@ How presets are used matters:
 - **Trap:** *renaming* a preset does **not** follow a run that referenced it by the old name — that run silently falls back to no extra LoRAs. Rename before you queue, or re-pick the preset on the run.
 - There is deliberately **no automatic NSFW gating** on individual LoRAs — the preset you pick carries the intent. If you want an "NSFW full" stack, make it a preset.
 
+### Klein generation quality
+
+*Raised by ashish.sinha.* **Generation steps** → `klein.generation_steps` (1–50, default **5**). How many sampler steps the local **Klein** engine spends on each generated image — variations, regenerations and the automatic small-image rescue. The shipped workflow had this pinned at **5** with no way to change it; the default is that same 5, so nothing moves until you raise it. More steps usually render more cleanly and cost proportionally more time (10 steps ≈ twice the wait per image).
+
+It is a **rendering** knob, not an anatomy fix: extra limbs, tails or wrong body parts come from the identity prompt describing the wrong kind of subject (see the subject-type note below), and no number of steps repairs that.
+
+Separate from **Upscale & improve ▸ Steps** (`klein.improve_steps`), which drives the manual improve pass only.
+
 ### Identity & Klein prompts (advanced)
 
-*Feature request by @bbsorry (雨田壹).* Every generated variation is prefixed by a hidden **identity lock** — a block of text that tells the engine to keep the subject's exact face and take the outfit and expression from the description, not the reference photo. These used to be baked in and invisible; now you can read and edit them. All are **global** (they apply to every dataset) and stored under `identity_prompts.*`.
+*Feature request by @bbsorry (雨田壹).* Every generated variation is prefixed by a hidden **identity lock** — a block of text that tells the engine to keep the subject's exact identity and take the pose and setting from the description, not the reference photo. These used to be baked in and invisible; now you can read and edit them. They are stored under `identity_prompts.*`.
+
+**One set per subject type.** *(Reported by ashish.sinha.)* The three identity locks are scoped to the dataset's **subject type** — Human, Animal, Creature, Object, Other. Pick the type with the chips at the top of the card; a small dot marks every type you have already customised. A prompt you write for Animal applies to **animal datasets only** and never to a human one. Before this, the override was one global text: someone who adapted it for animals then saw their human variations come back with tails, extra limbs and odd footwear.
+
+Storage follows that split, and nothing was renamed or migrated: the **Human** overrides stay on the original flat keys (`identity_prompts.face_single`, `.face_multi`, `.klein_identity`), which is where every override written before this change was stored, so yours keeps applying to your human datasets. The other types live under `identity_prompts.by_subject.<type>.<kind>` and never fall back to the flat key. `identity_prompts.klein_improve` and its toggle stay **global** on purpose — "add texture and detail" means the same thing for a person, a dog or a car.
+
+> If you had adapted the identity prompt for a non-human subject before this change, your text is now sitting in the **Human** set (that is where it was saved). Open the card, check the Human boxes, and move the text to the right subject type — nothing was discarded.
 
 **One box, already filled.** Each prompt is a **single editable box that already contains the exact text in use** — the built-in default when you have not overridden it. Put your cursor in it and change a word; there is no "load the default first" step, and no second read-only copy of the text below (the old two-box layout is gone).
 
@@ -113,7 +127,7 @@ How presets are used matters:
 
 **Reproducibility guarantee:** with nothing overridden, generation is **byte-identical** to before this setting existed — you only change behaviour if you deliberately edit the text away from the default.
 
-**Shortcut from the workspace.** The multi-reference instructions are also reachable from **Add images ▸ Extra refs ▸ ✎**, without opening Settings. That modal shows **both** of them — `identity_prompts.face_multi` (Nano Banana / ChatGPT) and `identity_prompts.klein_identity` (Klein) — because the engines do not share one text, and badges **every** prompt your ticked engines actually use (a Klein + ChatGPT run really uses both). Edits made there are the same **global** settings as here.
+**Shortcut from the workspace.** The multi-reference instructions are also reachable from **Add images ▸ Extra refs ▸ ✎**, without opening Settings. That modal shows **both** of them — `face_multi` (Nano Banana / ChatGPT) and `klein_identity` (Klein) — because the engines do not share one text, and badges **every** prompt your ticked engines actually use (a Klein + ChatGPT run really uses both). It edits the prompts of the **open dataset's subject type**, and says which one in its title and intro; edits made there are the same settings as here, for that subject.
 
 - **API engine — identity lock (single reference)** → `identity_prompts.face_single`. Prepended to Nano Banana / ChatGPT variations built from **one** reference photo.
 - **API engine — identity lock (multiple references)** → `identity_prompts.face_multi`. The same, for variations built from **several** reference photos — it tells the model every reference is the same person and to use them together.
@@ -412,7 +426,9 @@ A flat cheat-sheet of the main `config.json` keys, for quick lookup or hand-edit
 | `watermark.allow_crop` | When `true` (default), a border watermark is cropped off; when `false`, it is repainted instead. Also editable in the Clean bar. |
 | `klein.consistency_lora` | Filename of the Klein consistency LoRA, relative to ComfyUI's LoRA folder. |
 | `klein.consistency_strength` | Strength (0–1) applied to the Klein consistency LoRA. |
+| `klein.generation_steps` | Sampler steps for Klein **generation** (variations, regenerate, small-image rescue). Default `5` = the value hardcoded in the shipped workflow; 1–50. Not the improve pass (`klein.improve_steps`). |
 | `klein.generation_lora_presets` | Named generation-LoRA stacks (default empty) picked per run in Klein tuning; each has a name and up to 8 `{file, strength}` rows. Managed in Settings → Image engines. |
+| `identity_prompts.by_subject.<type>.<kind>` | Identity-lock overrides for a **non-human** subject type (`animal`, `creature`, `object`, `other`) × kind (`face_single`, `face_multi`, `klein_identity`). Human overrides stay on the flat `identity_prompts.<kind>` keys. Blank/absent = the shipped default for that subject. |
 | `klein.small_image_prompt` | Optional shared instruction for scraper rescue and single/bulk image improvement (empty = reference image only). |
 | `updates.repo` | GitHub repo the update checker reads its release feed from (default `perfectgf/lora-dataset-studio`). |
 

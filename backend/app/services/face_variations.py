@@ -57,8 +57,9 @@ KLEIN_IMAGE_IMPROVE_PROMPT = (
 
 # --- Editable identity / quality prompts (feature request @bbsorry / 雨田壹) ---
 # The four identity "locks" above were hardcoded and invisible. They are now
-# overridable GLOBALLY (config identity_prompts.<kind>) with a Settings UI +
-# "Restore default". get_identity_prompt returns the override ONLY when it is set
+# overridable (config identity_prompts.*) with a Settings UI + "Restore default",
+# PER SUBJECT TYPE — see identity_prompt_config_key for the layout.
+# get_identity_prompt returns the override ONLY when it is set
 # to non-blank text, otherwise the shipped constant — so the default path stays
 # byte-identical to the pre-feature behaviour (the reproducibility invariant the
 # existing wrapper tests lock). The config read is lazy: this module stays
@@ -207,32 +208,62 @@ def identity_prompt_default(kind: str, subject_type: str = 'human') -> str:
     return table[kind]
 
 
-def identity_prompt_defaults() -> dict:
+def identity_prompt_defaults(subject_type: str = 'human') -> dict:
     """All four shipped defaults as a fresh {kind: text} dict — read-only view
     surfaced in the settings payload so the UI can SHOW the effective default
     prompt (and let the user copy it into the field to edit), instead of an
     empty box with a generic "leave blank" placeholder. These are code
     constants, not secrets, so they are safe to return verbatim."""
-    return dict(_IDENTITY_PROMPT_DEFAULTS)
+    st = normalize_subject_type(subject_type)
+    return dict(_IDENTITY_DEFAULTS_BY_SUBJECT.get(st, _IDENTITY_PROMPT_DEFAULTS))
+
+
+def identity_prompt_defaults_by_subject() -> dict:
+    """Every subject type's defaults at once — {subject_type: {kind: text}}. The
+    Settings screen edits the prompts OUT of any dataset context, so it needs all
+    five sets to show the right default next to whichever subject the user picks."""
+    return {st: dict(table) for st, table in _IDENTITY_DEFAULTS_BY_SUBJECT.items()}
+
+
+# Kinds whose override is scoped PER SUBJECT TYPE. `klein_improve` is deliberately
+# NOT one of them: it is a subject-agnostic quality instruction ("add texture and
+# detail"), identical in every default table, so splitting it per subject would
+# multiply a setting nobody would want to keep in sync.
+PER_SUBJECT_PROMPT_KINDS = ('face_single', 'face_multi', 'klein_identity')
+
+
+def identity_prompt_config_key(kind: str, subject_type: str = 'human') -> str:
+    """Where the override for (kind, subject_type) lives in the config.
+
+    HUMAN keeps the ORIGINAL flat key `identity_prompts.<kind>` — never renamed,
+    never migrated. That is where every override written before this fix landed
+    (the editable-prompt UI shipped human-only text and no subject selector), so
+    reading it as the human override preserves it exactly: a user who tuned the
+    lock for people keeps it applying to people, with no migration step that could
+    lose it. Non-human subjects get their OWN branch,
+    `identity_prompts.by_subject.<subject_type>.<kind>`, with NO fallback to the
+    flat key — that fallback IS the bug (reported by ashish.sinha): a prompt
+    written while looking at an Animal dataset was stored globally and then rode
+    on human generations, producing tails and extra limbs."""
+    st = normalize_subject_type(subject_type)
+    if st == 'human' or kind not in PER_SUBJECT_PROMPT_KINDS:
+        return f'identity_prompts.{kind}'
+    return f'identity_prompts.by_subject.{st}.{kind}'
 
 
 def get_identity_prompt(kind: str, subject_type: str = 'human') -> str:
     """Effective identity/quality prompt for `kind` and `subject_type`: the user's
-    Settings override when it holds non-blank text, else the subject-type default
-    (human = byte-identical to the hardcoded constant). Lazy, defensive config read
-    so the no-override path a unit test exercises returns the default unchanged even
-    outside a Flask app.
+    Settings override FOR THAT SUBJECT TYPE when it holds non-blank text, else the
+    subject-type default (human = byte-identical to the hardcoded constant). Lazy,
+    defensive config read so the no-override path a unit test exercises returns the
+    default unchanged even outside a Flask app.
 
-    Deliberate corner: the Settings override (`identity_prompts.<kind>`) is GLOBAL —
-    when a user overrides it, it wins for EVERY subject type. That keeps the
-    editable-identity feature untouched (its config schema is a flat per-kind map);
-    subject_type only steers the DEFAULT (the blank-override fallback). A user who
-    overrode the human lock and then makes a non-human dataset inherits the human
-    override — an accepted edge case, not a regression of the default install."""
+    The override is scoped per subject type — see identity_prompt_config_key for
+    the storage layout and why human stays on the legacy flat key."""
     default = identity_prompt_default(kind, subject_type)
     try:
         from .. import config as cfg
-        override = cfg.get(f'identity_prompts.{kind}')
+        override = cfg.get(identity_prompt_config_key(kind, subject_type))
     except Exception:
         return default
     if isinstance(override, str) and override.strip():

@@ -7,7 +7,7 @@ const MAX_EXTRA_REFS = 3;
 export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCropRef, onEditRef, busy,
                                          importBusy = busy, visionBusy = false, nonce = 0,
                                          extraRefs = [], onAddExtraRef, onRemoveExtraRef,
-                                         onCropExtraRef }) {
+                                         onCropExtraRef, subjectType = 'human' }) {
   const inp = useRef(null);
   const inpExtra = useRef(null);
   // Auto head-crop = OPT-IN (vision pass, pauses ComfyUI). Default OFF: upload is
@@ -93,7 +93,7 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
           )}
           <button type="button" onClick={() => setPromptModal(true)}
             aria-label="Edit the identity instruction used with multiple references"
-            title="Edit the identity instruction sent with multiple references — global setting, one box per engine family"
+            title="Edit the identity instruction sent with multiple references — one box per engine family, for this dataset's subject type"
             className="w-6 h-6 rounded-lg border border-border-strong text-content-muted text-xs leading-none hover:bg-surface-raised">
             ✎
           </button>
@@ -101,7 +101,10 @@ export default function ReferencePanel({ refFilename, datasetId, onSetRef, onCro
             onChange={(e) => { if (e.target.files[0]) onAddExtraRef?.(e.target.files[0]); e.target.value = ''; }} />
         </div>
       )}
-      {promptModal && <IdentityPromptModal onClose={() => setPromptModal(false)} />}
+      {/* The modal edits the prompts of THIS dataset's subject — a human lock
+          shown on an Animal dataset is what made an animal-tuned text leak into
+          human generations. */}
+      {promptModal && <IdentityPromptModal subjectType={subjectType} onClose={() => setPromptModal(false)} />}
     </div>
   );
 }

@@ -25,13 +25,19 @@ def _reset_config_cache():
 
 
 def _patch_overrides(monkeypatch, mapping):
-    """Make cfg.get answer identity_prompts.<kind> from `mapping`, default else."""
+    """Make cfg.get answer identity_prompts.* from a nested `mapping` shaped like
+    the real config node, walked dotted-path style exactly as config.get does."""
     import app.config as cfg
 
     def fake_get(key, default=None):
-        if key.startswith('identity_prompts.'):
-            return mapping.get(key.split('.', 1)[1], default)
-        return default
+        if not key.startswith('identity_prompts.'):
+            return default
+        node = mapping
+        for part in key.split('.')[1:]:
+            if not isinstance(node, dict) or part not in node:
+                return default
+            node = node[part]
+        return node
 
     monkeypatch.setattr(cfg, 'get', fake_get)
 
@@ -107,7 +113,8 @@ def test_config_defaults_are_additive_and_blank():
     from app.config import DEFAULTS
     ip = DEFAULTS['identity_prompts']
     assert ip == {'face_single': '', 'face_multi': '', 'klein_identity': '',
-                  'klein_improve': '', 'klein_improve_enabled': True}
+                  'klein_improve': '', 'klein_improve_enabled': True,
+                  'by_subject': {}}
 
 
 # --- D: Klein-improve toggle + override (service path) -----------------------

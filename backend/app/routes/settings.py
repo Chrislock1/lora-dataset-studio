@@ -87,10 +87,16 @@ def _settings_payload() -> dict:
     # Settings UI can display the REAL default text (and offer "Load default to
     # edit") instead of leaving the field blank behind a generic placeholder.
     # Import-pure module (no Flask); these are code constants, not secrets.
-    from ..services.face_variations import identity_prompt_defaults
+    # `identity_prompt_defaults` stays the HUMAN set (the historical payload key,
+    # unchanged for any client reading it); `_by_subject` adds the other four sets
+    # so the Settings screen — which edits out of any dataset context — can show
+    # the real default next to whichever subject type the user is editing.
+    from ..services.face_variations import (identity_prompt_defaults,
+                                            identity_prompt_defaults_by_subject)
     return {
         'config': cfg.load_config(), 'secrets': _secret_presence(),
         'identity_prompt_defaults': identity_prompt_defaults(),
+        'identity_prompt_defaults_by_subject': identity_prompt_defaults_by_subject(),
         # What THIS running process is actually bound to — run.py stamps these
         # before app.run(); a dev/test boot that never went through run.py (or a
         # WSGI launch) leaves them unset, so the Server card just hides the

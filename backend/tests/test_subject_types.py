@@ -86,12 +86,20 @@ def test_non_human_locks_drop_human_face_vocabulary():
 
 
 def _patch_overrides(monkeypatch, mapping):
+    """Answer identity_prompts.* from a nested `mapping` shaped like the real
+    config node (flat kinds + a `by_subject` branch), walked dotted-path style
+    exactly as config.get does."""
     import app.config as cfg
 
     def fake_get(key, default=None):
-        if key.startswith('identity_prompts.'):
-            return mapping.get(key.split('.', 1)[1], default)
-        return default
+        if not key.startswith('identity_prompts.'):
+            return default
+        node = mapping
+        for part in key.split('.')[1:]:
+            if not isinstance(node, dict) or part not in node:
+                return default
+            node = node[part]
+        return node
     monkeypatch.setattr(cfg, 'get', fake_get)
 
 
@@ -109,12 +117,34 @@ def test_blank_override_falls_back_to_subject_default(monkeypatch):
     assert fv.get_identity_prompt('face_single', 'human') == fv.IDENTITY_GUARD
 
 
-def test_global_override_wins_for_every_subject_type(monkeypatch):
-    """Documented corner: the override is GLOBAL — it wins for all subject types,
-    keeping the editable-identity feature's flat config schema untouched."""
-    _patch_overrides(monkeypatch, {'face_single': 'MY LOCK'})
-    for st in fv.SUBJECT_TYPES:
-        assert fv.get_identity_prompt('face_single', st) == 'MY LOCK'
+def test_flat_override_is_the_human_override_only(monkeypatch):
+    """The flat `identity_prompts.<kind>` key is the HUMAN override — it used to be
+    global and win for every subject type, which is the leak reported by
+    ashish.sinha. It keeps its name and its meaning for human datasets (no
+    migration, nothing lost); every other subject falls back to ITS OWN default."""
+    _patch_overrides(monkeypatch, {'face_single': 'MY HUMAN LOCK'})
+    assert fv.get_identity_prompt('face_single', 'human') == 'MY HUMAN LOCK'
+    assert fv.get_identity_prompt('face_single', 'animal') == fv.IDENTITY_GUARD_ANIMAL
+    assert fv.get_identity_prompt('face_single', 'object') == fv.IDENTITY_GUARD_OBJECT
+
+
+def test_per_subject_override_is_scoped_to_its_subject(monkeypatch):
+    _patch_overrides(monkeypatch, {'by_subject': {'animal': {'face_single': 'ANIMAL LOCK'}}})
+    assert fv.get_identity_prompt('face_single', 'animal') == 'ANIMAL LOCK'
+    assert fv.get_identity_prompt('face_single', 'human') == fv.IDENTITY_GUARD
+    assert fv.get_identity_prompt('face_single', 'creature') == fv.IDENTITY_GUARD_CREATURE
+
+
+def test_config_key_layout(monkeypatch):
+    """The storage contract the frontend mirrors: human on the legacy flat key,
+    non-human on its own branch, klein_improve always flat (subject-agnostic)."""
+    assert fv.identity_prompt_config_key('face_single', 'human') == 'identity_prompts.face_single'
+    assert (fv.identity_prompt_config_key('klein_identity', 'animal')
+            == 'identity_prompts.by_subject.animal.klein_identity')
+    assert (fv.identity_prompt_config_key('klein_improve', 'animal')
+            == 'identity_prompts.klein_improve')
+    # an unknown subject normalises to human, never to a bogus branch
+    assert fv.identity_prompt_config_key('face_multi', 'dragonfly') == 'identity_prompts.face_multi'
 
 
 # --- wrappers thread subject_type -------------------------------------------

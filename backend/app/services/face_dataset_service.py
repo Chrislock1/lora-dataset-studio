@@ -222,6 +222,15 @@ def _improve_int(key, default) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, min(_IMPROVE_MAX_STEPS, v))
+
+
+def _generation_steps() -> int:
+    """Sampler steps for a Klein GENERATION job (variations, regenerate, small-image
+    rescue). The shipped workflow hardcodes 5 at node 77 and nothing ever passed
+    `sampler_steps` on these paths, so the knob existed but was unreachable
+    (reported by ashish.sinha, Discord). Default 5 = that exact behaviour; a bad
+    config value degrades to it rather than crashing the enqueue."""
+    return _improve_int('generation_steps', 5)
 # KLEIN_IMAGE_IMPROVE_PROMPT is the shipped DEFAULT of the editable klein_improve
 # prompt (imported from face_variations, which owns the identity/quality prompt
 # registry). Re-exported here so `svc.KLEIN_IMAGE_IMPROVE_PROMPT` keeps resolving.
@@ -3163,7 +3172,7 @@ def _save_small_scrape_pair(user_id, dataset_id, raw, prompt, source_metadata=No
     try:
         job_id = enqueue_klein_edit(
             user_id=str(user_id), source_filename=filename, source_path=source_path,
-            edit_prompt=prompt,
+            edit_prompt=prompt, sampler_steps=_generation_steps(),
             extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                             'variation_label': label,
                             'derivation_kind': KLEIN_SMALL_IMAGE,
@@ -4904,7 +4913,7 @@ def generate_variations(user_id, dataset_id, variations, multiplier, klein_model
                             subject_type=subject_type_of(ds)),
                         klein_model=klein_model,
                         lora_strength=lora_strength, extra_ref_paths=extra_paths,
-                        generation_loras=run_loras,
+                        generation_loras=run_loras, sampler_steps=_generation_steps(),
                         extra_metadata={'is_dataset': True, 'dataset_id': dataset_id,
                                         'variation_label': v.get('label')})
                 except Exception:
@@ -5334,6 +5343,7 @@ def regenerate_image(user_id, image_id, lora_strength=None, prompt=None, app=Non
             klein_model=model,
             lora_strength=lora_strength, extra_ref_paths=extra_paths,
             generation_loras=resolve_generation_lora_preset(generation_lora_preset),
+            sampler_steps=_generation_steps(),
             extra_metadata={'is_dataset': True, 'dataset_id': img.dataset_id,
                             'variation_label': img.variation_label})
 

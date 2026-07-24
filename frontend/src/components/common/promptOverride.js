@@ -79,6 +79,125 @@ export const IDENTITY_PROMPT_FIELDS = [
   },
 ];
 
+/* The descriptions above name a FACE and a person — true of the human set only.
+   A box shown for an Animal dataset that says "keep the exact face" is what
+   invites a user to rewrite it for animals; the wording has to follow the
+   subject. Only the human strings above stay byte-identical (they are the ones
+   users already know); the rest are derived per subject. */
+const SUBJECT_NOUNS = {
+  animal: { one: 'the animal', kind: 'animal', trait: 'coat, markings and build' },
+  creature: { one: 'the creature', kind: 'creature', trait: 'body form, texture and features' },
+  object: { one: 'the object', kind: 'object', trait: 'shape, colour and materials' },
+  other: { one: 'the subject', kind: 'subject', trait: 'shape, colours and details' },
+};
+
+/** The three editable identity fields, worded for `subjectType`. Keys, ids and
+ *  engine mapping never change — only the human-readable text does. */
+export function identityPromptFields(subjectType) {
+  const st = normalizeSubject(subjectType);
+  if (st === 'human') return IDENTITY_PROMPT_FIELDS;
+  const n = SUBJECT_NOUNS[st];
+  const descs = {
+    face_single: `Prepended to every Nano Banana / ChatGPT variation made from ONE reference photo of ${n.one}. Tells the model to preserve its ${n.trait}, and to take the pose and setting from the description, not the reference.`,
+    face_multi: `Same, but for variations generated from SEVERAL reference photos of the same ${n.kind} — tells the model they all show one ${n.kind} and to use them together.`,
+    klein_identity: `The instruction block Klein (local) uses to restage the shot while keeping ${n.one} identical. Steers pose/framing/setting changes without altering its ${n.trait}.`,
+  };
+  const labels = {
+    face_single: 'API engine — identity lock (single reference)',
+    face_multi: 'API engine — identity lock (multiple references)',
+    klein_identity: `Klein — restage & ${n.kind}-identity block`,
+  };
+  return IDENTITY_PROMPT_FIELDS.map((f) => ({
+    ...f, label: labels[f.key] || f.label, desc: descs[f.key] || f.desc,
+  }));
+}
+
+/* --- Per-subject-type storage ------------------------------------------------
+   An identity lock is written FOR A SUBJECT. Storing one text for all of them is
+   what let a prompt tuned on an Animal dataset ride on human generations —
+   tails, extra limbs, odd footwear (reported by ashish.sinha on Discord).
+
+   Layout, mirroring backend face_variations.identity_prompt_config_key:
+     human      -> identity_prompts.<kind>                    (the ORIGINAL key)
+     non-human  -> identity_prompts.by_subject.<type>.<kind>
+   Human deliberately keeps the flat key: every override written before this fix
+   landed there (the editor showed human text and had no subject selector), so
+   reading it as the human override preserves it with no migration. A non-human
+   subject NEVER falls back to it — that fallback is the bug.
+   `klein_improve` (+ its toggle) stays flat and global: it is a subject-agnostic
+   quality instruction, identical in all five default tables. */
+
+/** Which subject types own their own copy of the identity locks. */
+export const PROMPT_SUBJECT_TYPES = ['human', 'animal', 'creature', 'object', 'other'];
+
+/** The kinds scoped per subject — mirrors backend PER_SUBJECT_PROMPT_KINDS. */
+export const PER_SUBJECT_PROMPT_KINDS = ['face_single', 'face_multi', 'klein_identity'];
+
+function normalizeSubject(subjectType) {
+  const s = String(subjectType || 'human').toLowerCase();
+  return PROMPT_SUBJECT_TYPES.includes(s) ? s : 'human';
+}
+
+function isFlat(subjectType, kind) {
+  return normalizeSubject(subjectType) === 'human'
+    || !PER_SUBJECT_PROMPT_KINDS.includes(kind);
+}
+
+/** The stored override for (subjectType, kind) inside a config `identity_prompts`
+ *  object — '' / undefined meaning "follow the shipped default". */
+export function readIdentityPrompt(identityPrompts, subjectType, kind) {
+  const ip = identityPrompts || {};
+  if (isFlat(subjectType, kind)) return ip[kind];
+  return ((ip.by_subject || {})[normalizeSubject(subjectType)] || {})[kind];
+}
+
+/** A NEW `identity_prompts` object with (subjectType, kind) set to `value`.
+ *  Immutable: React state stays replaced, never mutated in place. */
+export function writeIdentityPrompt(identityPrompts, subjectType, kind, value) {
+  const ip = { ...(identityPrompts || {}) };
+  if (isFlat(subjectType, kind)) {
+    ip[kind] = value;
+    return ip;
+  }
+  const st = normalizeSubject(subjectType);
+  const by = { ...(ip.by_subject || {}) };
+  by[st] = { ...(by[st] || {}), [kind]: value };
+  ip.by_subject = by;
+  return ip;
+}
+
+/** The PARTIAL `identity_prompts` patch that saves `kinds` for ONE subject type.
+ *  /api/settings deep-merges, so a save from the workspace touches only the
+ *  prompts of the dataset's own subject — never another subject's texts. */
+export function identityPromptPatch(subjectType, kinds, identityPrompts) {
+  let patch = {};
+  for (const k of kinds) {
+    patch = writeIdentityPrompt(
+      patch, subjectType, k, readIdentityPrompt(identityPrompts, subjectType, k) ?? '');
+  }
+  return patch;
+}
+
+/** The shipped defaults for one subject type, from a /api/settings payload.
+ *  Falls back to the flat human map so an older payload (or a failed load) still
+ *  shows real text instead of an empty box. */
+export function identityDefaultsFor(payload, subjectType) {
+  const p = payload || {};
+  const st = normalizeSubject(subjectType);
+  const bySubject = p.identity_prompt_defaults_by_subject || {};
+  return bySubject[st] || p.identity_prompt_defaults || {};
+}
+
+/** True when this subject type carries at least one real override — drives the
+ *  "edited" dot on the Settings subject selector, so a user can SEE that another
+ *  subject holds a custom prompt instead of discovering it through a bad render. */
+export function subjectHasOverride(identityPrompts, subjectType) {
+  return PER_SUBJECT_PROMPT_KINDS.some((k) => {
+    const v = readIdentityPrompt(identityPrompts, subjectType, k);
+    return typeof v === 'string' && v.trim() !== '';
+  });
+}
+
 /** The multi-reference identity prompts, in the order the Extra-refs modal
  *  shows them. Extra references mean ref_count > 1, so the API engines take
  *  `face_multi`; Klein takes `klein_identity` whatever the reference count.

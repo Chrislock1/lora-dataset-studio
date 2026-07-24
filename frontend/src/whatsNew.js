@@ -47,6 +47,22 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-25-identity-prompts-per-subject',
+    date: '2026-07-25',
+    title: '🐾 Identity prompts no longer leak between subject types',
+    blurb:
+      'Tweak the identity instruction on an Animal dataset and your Human datasets used to inherit it — which is exactly how variations of a person came back with tails, extra limbs and odd footwear. Each subject type (Human, Animal, Creature, Object, Other) now keeps its OWN set of identity prompts, and both places you can edit them say which subject you are editing: the ✎ button next to Extra refs edits the prompts of the dataset you have open, and Settings ▸ Image engines has a Subject type picker with a dot on every type you have customised. Anything you had already written stays where it was, on the Human set. Reported by ashish.sinha on Discord.',
+    to: '/settings/engines',
+  },
+  {
+    id: '2026-07-25-klein-generation-steps',
+    date: '2026-07-25',
+    title: '🎚️ Klein generation steps are yours to set',
+    blurb:
+      'The local Klein engine always spent exactly 5 sampler steps on each variation, with no way to change it. Settings ▸ Image engines ▸ Klein generation quality now exposes that number (1–50). It still starts at 5, so nothing changes until you raise it; more steps render more cleanly and cost proportionally more time. It is a rendering knob, not a fix for anatomy — extra limbs come from the identity prompt, not from the step count. Raised by ashish.sinha on Discord.',
+    to: '/settings/engines',
+  },
+  {
     id: '2026-07-24-bank-watermark-two-level-cleaning',
     date: '2026-07-24',
     title: '🚩 Banks can now REMOVE the watermarks they find — in two safe steps',

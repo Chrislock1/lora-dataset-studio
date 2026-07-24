@@ -62,6 +62,9 @@ export default function SettingsPage() {
   // UI can SHOW the real default text (and "Load default to edit") rather than
   // an empty box. Never persisted; a blank override still means "use default".
   const [promptDefaults, setPromptDefaults] = useState({})
+  // Same, one set PER SUBJECT TYPE ({human,animal,…}: {kind: text}) — the identity
+  // card edits one subject at a time and must show that subject's real default.
+  const [promptDefaultsBySubject, setPromptDefaultsBySubject] = useState({})
   const [secretsPresence, setSecretsPresence] = useState({})
   const [secretInputs, setSecretInputs] = useState({})
   const [testResults, setTestResults] = useState({})
@@ -77,6 +80,7 @@ export default function SettingsPage() {
       setSavedConfig(data.config)
       setRuntime(data.runtime || { host: null, port: null })
       setPromptDefaults(data.identity_prompt_defaults || {})
+      setPromptDefaultsBySubject(data.identity_prompt_defaults_by_subject || {})
       setSecretsPresence(data.secrets)
     } catch (e) {
       toast.error(`Failed to load settings: ${e.message}`)
@@ -89,6 +93,13 @@ export default function SettingsPage() {
 
   const setField = (section, key, value) => {
     setConfig((prev) => ({ ...prev, [section]: { ...prev[section], [key]: value } }))
+  }
+
+  // The identity prompts are NESTED (identity_prompts.by_subject.<type>.<kind>
+  // for non-human subjects), which the flat section/key setter above cannot
+  // express. The card hands in a pure updater from promptOverride.js.
+  const setIdentityPrompts = (updater) => {
+    setConfig((prev) => ({ ...prev, identity_prompts: updater(prev.identity_prompts || {}) }))
   }
 
   const recordTestResult = (target, result) => {
@@ -259,7 +270,8 @@ export default function SettingsPage() {
   const sectionProps = {
     config, setField, secretsPresence, secretInputs, setSecretInputs,
     testResults, recordTestResult, saveSecretIfPending, saveConfigSection, handleDeleteSecret,
-    toggleEngine, handleSave, saving, runtime, promptDefaults, caps, refreshCaps: refresh, toast,
+    toggleEngine, handleSave, saving, runtime, promptDefaults, promptDefaultsBySubject,
+    setIdentityPrompts, caps, refreshCaps: refresh, toast,
   }
 
   const activeId = SECTION_COMPONENTS[section] ? section : 'overview'
