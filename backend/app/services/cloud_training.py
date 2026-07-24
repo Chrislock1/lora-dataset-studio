@@ -3157,29 +3157,125 @@ def delete_cloud_checkpoint(dataset_id, run_id, filename) -> str:
     return filename
 
 
+# ── Staging cleanup (global 🧹 and per-run 🧹) ────────────────────────────────
+# Both entry points share ONE sparing rule and ONE trashing step, so a run that
+# the global purge spares can never be trashed by the per-run button (and back).
+
+def staging_spare_reason(run) -> str | None:
+    """Why this run's staging must NOT be trashed, or None when it is fair game.
+    The single source of truth for both 🧹 buttons and for the per-run button's
+    disabled state — duplicating it is how the two drift apart."""
+    if run.status in ACTIVE_STATES:
+        return 'this run is still active — its staging is being written to'
+    if run.status == 'error_pod_kept':
+        return ('its pod was kept for manual recovery — clean it up after you '
+                'have retrieved what you need')
+    return None
+
+
+def _trash_staging(run) -> int:
+    """Move ONE run's staging dir to the trash; returns the bytes it held (0 when
+    there was nothing on disk). Callers own the sparing check."""
+    from . import trash
+    sd = run.staging_dir
+    if not sd or not os.path.isdir(sd):
+        return 0
+    size = lt._dir_size(sd)
+    trash.send_to_trash(sd, context=f'staging_run{run.id}')
+    _staging_size_cache.pop(run.id, None)
+    if run.checkpoint_local_path:
+        _set(run, checkpoint_local_path=None)
+    return size
+
+
+# run_id -> (expires_at, bytes). A staging dir is a dataset copy + samples +
+# checkpoints — thousands of files per run, tens of thousands across a history.
+# Walking them belongs to an EXPLICIT request, never to the hub's 5 s poll, and a
+# short TTL keeps a re-open (or a second tab) from re-walking the same disk.
+_staging_size_cache = {}
+_STAGING_SIZE_TTL = 60.0
+
+
+def staging_sizes(run_ids=None) -> dict:
+    """{run_id: bytes on disk} for the runs whose staging dir still exists —
+    what the per-run 🧹 needs to name the weight it is about to move. Runs with
+    no staging (never launched, already purged, hand-deleted) are simply absent,
+    which the UI reads as "nothing to clean here". Best-effort: a directory that
+    cannot be walked is skipped rather than failing the whole request."""
+    now = time.time()
+    q = CloudTrainingRun.query
+    if run_ids is not None:
+        ids = [int(i) for i in run_ids]
+        if not ids:
+            return {}
+        q = q.filter(CloudTrainingRun.id.in_(ids))
+    out = {}
+    for run in q.all():
+        cached = _staging_size_cache.get(run.id)
+        if cached and cached[0] > now:
+            if cached[1]:
+                out[run.id] = cached[1]
+            continue
+        sd = run.staging_dir
+        size = 0
+        if sd and os.path.isdir(sd):
+            try:
+                size = lt._dir_size(sd)
+            except OSError as e:
+                logger.warning('staging size: could not walk %s: %s', sd, e)
+                continue
+        _staging_size_cache[run.id] = (now + _STAGING_SIZE_TTL, size)
+        if size:
+            out[run.id] = size
+    return out
+
+
+def purge_run_staging(run_id) -> dict:
+    """Per-run 🧹: move THIS run's staging dir to the trash. Same sparing rule as
+    the global purge (staging_spare_reason), so the two can't disagree; the DB row
+    stays (history). Raises ValueError on an unknown or spared run — the caller
+    turns it into a 400 with the reason, instead of a silent no-op."""
+    run = CloudTrainingRun.query.get(int(run_id))
+    if not run:
+        raise ValueError('unknown cloud run')
+    reason = staging_spare_reason(run)
+    if reason:
+        raise ValueError(f'this run\'s staging is spared: {reason}')
+    if not run.staging_dir or not os.path.isdir(run.staging_dir):
+        return {'purged': False, 'freed_bytes': 0, 'already_clean': True}
+    try:
+        freed = _trash_staging(run)
+    except OSError as e:
+        logger.warning('purge run %s: could not trash %s: %s',
+                       run.id, run.staging_dir, e)
+        raise RuntimeError(f'could not move this run\'s staging to the trash: {e}')
+    return {'purged': True, 'freed_bytes': freed, 'already_clean': False}
+
+
 def purge_finished_runs() -> dict:
     """Hub 'Clean finished runs': move the staging dirs of TERMINAL runs to the
     trash — dataset copies, samples and checkpoint duplicates of results that
     are already imported/mirrored. Active runs and error_pod_kept (manual
-    recovery may still be under way) are spared. DB rows stay (history)."""
-    from . import trash
+    recovery may still be under way) are spared. DB rows stay (history).
+
+    `already_clean` tells "there was nothing to purge" apart from "0 purged
+    because every attempt failed" — the caller shows two different messages."""
     purged = 0
     freed = 0
+    candidates = 0
     for run in CloudTrainingRun.query.all():
-        if run.status in ACTIVE_STATES or run.status == 'error_pod_kept':
+        if staging_spare_reason(run):
             continue
-        sd = run.staging_dir
-        if not sd or not os.path.isdir(sd):
+        if not run.staging_dir or not os.path.isdir(run.staging_dir):
             continue
+        candidates += 1
         try:
-            freed += lt._dir_size(sd)
-            trash.send_to_trash(sd, context=f'staging_run{run.id}')
+            freed += _trash_staging(run)
             purged += 1
-            if run.checkpoint_local_path:
-                _set(run, checkpoint_local_path=None)
         except OSError as e:
-            logger.warning('purge: could not trash %s: %s', sd, e)
-    return {'purged_runs': purged, 'freed_bytes': freed}
+            logger.warning('purge: could not trash %s: %s', run.staging_dir, e)
+    return {'purged_runs': purged, 'freed_bytes': freed,
+            'already_clean': candidates == 0}
 
 
 def cloud_progress(user_id, dataset_id, train_type=None) -> dict:

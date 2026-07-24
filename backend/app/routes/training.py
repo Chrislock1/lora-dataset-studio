@@ -1128,6 +1128,41 @@ def dataset_train_cloud_purge():
     return jsonify({'ok': True, **ct.purge_finished_runs()})
 
 
+@bp.get('/dataset/train/cloud/staging-sizes')
+def dataset_train_cloud_staging_sizes():
+    """How much disk each cloud run's staging dir still holds, so the Runs hub can
+    show "8.2 GB on disk" on a card and name that weight in the per-run 🧹
+    confirmation. DELIBERATELY its own endpoint (and not a field of the runs
+    payload): sizing means walking thousands of files, which must not ride the
+    hub's 5 s poll. Optional ?run_ids=1,2,3 narrows the walk to the shown cards."""
+    raw = (request.args.get('run_ids') or '').strip()
+    ids = None
+    if raw:
+        try:
+            ids = [int(x) for x in raw.split(',') if x.strip()]
+        except ValueError:
+            return jsonify({'error': 'run_ids must be a comma-separated list of run ids'}), 400
+    sizes = ct.staging_sizes(ids)
+    return jsonify({'ok': True,
+                    'sizes': {str(k): v for k, v in sizes.items()},
+                    'total_bytes': sum(sizes.values())})
+
+
+@bp.post('/dataset/train/cloud/purge-run')
+def dataset_train_cloud_purge_run():
+    """Trash the staging dir of ONE finished cloud run — targeted cleanup, so a
+    45-run history no longer forces an all-or-nothing purge. Spares exactly what
+    the global purge spares (active runs, kept pods) via the shared rule."""
+    body = request.get_json(silent=True) or {}
+    if body.get('run_id') in (None, ''):
+        return jsonify({'error': 'run_id is required'}), 400
+    try:
+        res = ct.purge_run_staging(body['run_id'])
+    except Exception as e:
+        return _map_error(e)
+    return jsonify({'ok': True, **res})
+
+
 @bp.post('/dataset/<int:dataset_id>/train/import')
 def dataset_train_import(dataset_id):
     gate = _require_aitoolkit()

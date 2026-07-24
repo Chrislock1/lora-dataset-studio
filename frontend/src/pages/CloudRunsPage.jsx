@@ -23,6 +23,12 @@ import {
 } from '../utils/trainingRuns';
 import { confirmableRetryFlag } from '../utils/trainingRefusals';
 import { runsHubContinueLanes } from '../utils/runsHubContinueLanes';
+import {
+  TRASH_REMINDER,
+  purgeAllResultMessage,
+  purgeRunResultMessage,
+  runStagingCleanup,
+} from '../utils/stagingCleanup';
 
 /* Dedicated hub for cloud training runs across ALL datasets: watch the ones in
    progress (live progress + samples), stop them, and download finished LoRAs —
@@ -283,6 +289,43 @@ export default function CloudRunsPage() {
       if (r.ok) setData(await r.json());
     } catch { /* transient — next tick retries */ }
   }, [historyLimit]);
+
+  // How much disk each run's staging still holds — what the per-run 🧹 names
+  // before moving it. Sizing walks thousands of files per run, so it is fetched
+  // ON DEMAND (mount, and again after a cleanup) and deliberately NOT folded
+  // into the 5 s poll: the hub must stay as light as it is today.
+  const [stagingSizes, setStagingSizes] = useState({});   // run_id -> bytes
+  const loadStagingSizes = useCallback(async () => {
+    try {
+      const r = await fetch('/api/dataset/train/cloud/staging-sizes', { credentials: 'include' });
+      if (r.ok) {
+        const d = await r.json();
+        setStagingSizes(d?.sizes || {});
+      }
+    } catch { /* sizes are a bonus — the cards render fine without them */ }
+  }, []);
+  useEffect(() => { loadStagingSizes(); }, [loadStagingSizes]);
+
+  // Per-run 🧹. Same trash mechanism and the same sparing rule as the global
+  // button (runStagingCleanup mirrors the backend), so a run one spares the
+  // other can never take. Sizes are refetched so the card's weight disappears.
+  const [purgingRun, setPurgingRun] = useState({});        // run_id -> bool
+  const purgeRun = useCallback(async (run) => {
+    const info = runStagingCleanup(run, stagingSizes);
+    if (!info.available || !window.confirm(info.confirmMessage)) return;
+    setPurgingRun((m) => ({ ...m, [run.run_id]: true }));
+    try {
+      const d = await postJson('/api/dataset/train/cloud/purge-run', { run_id: run.run_id });
+      const msg = purgeRunResultMessage(run, d);
+      toast[msg.kind === 'success' ? 'success' : 'info'](msg.text);
+      await loadStagingSizes();
+      poll();
+    } catch (e) {
+      toast.error(e?.message || 'Could not clean this run');
+    } finally {
+      setPurgingRun((m) => { const n = { ...m }; delete n[run.run_id]; return n; });
+    }
+  }, [stagingSizes, loadStagingSizes, poll, toast]);
 
   useEffect(() => {
     let alive = true;
@@ -575,6 +618,7 @@ export default function CloudRunsPage() {
     const duration = formatDuration(runDurationSeconds(run));
     const line = settingsLine(run);
     const thumbKey = run.share_key || key;
+    const cleanup = runStagingCleanup(run, stagingSizes);
     return (
       <div key={key} id={ident ? runRowDomId(ident.source, ident.id) : undefined}
         className={`flex gap-2.5 sm:gap-3 rounded-lg border border-border border-l-2 bg-app/40 p-2.5 ${cardAccent(run.status)}`}>
@@ -625,6 +669,15 @@ export default function CloudRunsPage() {
             {run.source === 'cloud' && run.saves > 0 && (
               <span className="tabular-nums" title="Checkpoints this run saved (synced locally)">
                 💾 {run.saves} save{run.saves > 1 ? 's' : ''}
+              </span>
+            )}
+            {/* What this run still costs in DISK — the figure a targeted cleanup
+                needs. Absent when its staging is already gone (nothing to show,
+                and no 🧹 either). */}
+            {cleanup.size && (
+              <span className="tabular-nums text-content-subtle"
+                title="Disk this run's staging folder still holds (dataset copy, samples, checkpoints)">
+                🗄 {cleanup.size} on disk
               </span>
             )}
             {run.gpu && <span>{run.gpu}</span>}
@@ -707,6 +760,18 @@ export default function CloudRunsPage() {
                 title="Download this run's full settings as a paste-safe text file (recipe / help thread)"
                 className="ml-auto rounded-lg border border-transparent px-2 py-1 text-content-muted hover:border-border hover:text-content text-xs font-medium">
                 ⎘ Share config
+              </button>
+            )}
+            {/* Per-run cleanup, so a long history no longer forces the all-or-
+                nothing purge. Only shown when there IS something to move and the
+                run is not spared (active pod, kept pod) — the same rule the
+                global 🧹 applies, read from runStagingCleanup. */}
+            {cleanup.available && (
+              <button type="button" onClick={() => purgeRun(run)}
+                disabled={!!purgingRun[run.run_id]}
+                title={cleanup.title}
+                className={`rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1 text-red-200 hover:bg-red-500/20 text-xs font-semibold disabled:opacity-40 ${run.share_key ? '' : 'ml-auto'}`}>
+                {purgingRun[run.run_id] ? '🧹 Cleaning…' : `🧹 Clean ${cleanup.size}`}
               </button>
             )}
           </div>
@@ -938,9 +1003,16 @@ export default function CloudRunsPage() {
             {!recentCollapsed && (
               <button type="button"
                 onClick={async () => {
-                  if (!window.confirm('Move the staging folders of all FINISHED runs to the trash?\n\nDataset copies, samples and checkpoint duplicates already imported. Active runs and pods kept for recovery are spared. Recoverable until you empty the trash in Settings.')) return;
+                  if (!window.confirm(`Move the staging folders of all FINISHED runs to the trash?\n\nDataset copies, samples and checkpoint duplicates already imported. Active runs and pods kept for recovery are spared.\n${TRASH_REMINDER}`)) return;
                   const d = await postJson('/api/dataset/train/cloud/purge', {});
-                  if (d.ok) toast.info(`Cleaned ${d.purged_runs} run(s) — ${(d.freed_bytes / 1e9).toFixed(1)} GB moved to the trash.`);
+                  if (d.ok) {
+                    // "62.6 GB moved to the trash" on its own reads as "space
+                    // reclaimed" — it is not, the trash is on the same disk. And
+                    // "Cleaned 0 run(s)" said nothing about WHY. Both fixed here.
+                    const msg = purgeAllResultMessage(d);
+                    toast[msg.kind === 'error' ? 'error' : msg.kind === 'success' ? 'success' : 'info'](msg.text);
+                  }
+                  await loadStagingSizes();
                   poll();
                 }}
                 className="ml-auto px-2.5 py-1 rounded-lg bg-red-500/10 border border-red-500/30 text-red-200 text-xs font-semibold">
