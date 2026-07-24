@@ -11,8 +11,8 @@
  *
  * Everything here derives from the /watermark/levels payload:
  *   flagged      — still carrying a watermark (both levels' pool)
- *   croppable    — of those, the ones the router would crop → level 1's share
- *   inpaintable  — the rest → level 2's share
+ *   croppable    — of those, the ones the router would crop → level 2's share
+ *   inpaintable  — the rest → level 3's share
  *   cropped / inpainted / dismissed — already handled, by which route
  *   needs_rescan — flagged by an older build with no box: nothing can route them
  */
@@ -62,7 +62,7 @@ export function findLevelState(levels, { live = false, visionReady = false } = {
   };
 }
 
-/** Level 1 — auto-crop. Always available (CPU/PIL), so the only reasons it can
+/** Level 2 — auto-crop. Always available (CPU/PIL), so the only reasons it can
  * be off are "a pass is already running" and "nothing to crop". */
 export function cropLevelState(levels, { live = false } = {}) {
   const c = levelCounts(levels);
@@ -71,7 +71,7 @@ export function cropLevelState(levels, { live = false } = {}) {
     : c.croppable === 0
       ? (c.flagged > 0
         ? 'Nothing to crop: the remaining marks are not in a border, or cropping '
-          + 'would shrink the image too much. Use level 2.'
+          + 'would shrink the image too much. Use level 3.'
         : 'Nothing flagged — run 🚩 Find watermarks first.')
       : null;
   return {
@@ -83,7 +83,7 @@ export function cropLevelState(levels, { live = false } = {}) {
   };
 }
 
-/** Level 2 — inpaint. `method` is the engine toggle: 'lama' (or 'auto') repaints
+/** Level 3 — inpaint. `method` is the engine toggle: 'lama' (or 'auto') repaints
  * small off-centre marks and leaves marks ON the subject flagged; 'klein' also
  * repaints those. An engine that isn't installed disables the button with the
  * install path spelled out — never a silent failure mid-pass. */

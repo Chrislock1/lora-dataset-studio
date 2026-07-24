@@ -6,8 +6,9 @@
  * disk untouched. That is what lets both levels be tried freely: ↩ Undo just
  * throws our copy away.
  *
- * Level 1 (✂ Auto-crop) cuts off marks sitting in a border — no model, no GPU,
- * and it invents no pixel. Level 2 (🧽 Inpaint) repaints whatever level 1 could
+ * Level 1 (🚩 Find) records WHERE each mark sits — the two below route on it.
+ * Level 2 (✂ Auto-crop) cuts off marks sitting in a border — no model, no GPU,
+ * and it invents no pixel. Level 3 (🧽 Inpaint) repaints whatever level 2 could
  * not handle, with LaMa (fast) or Klein (slower, also handles marks ON the
  * subject). Each level shows its own remaining/handled counts, because the whole
  * point is to see how far down the funnel the bank already is.
@@ -143,7 +144,7 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[0.6875rem] font-semibold uppercase tracking-wide text-content-subtle">
-          Level 2 engine
+          Level 3 engine
         </span>
         <div className="flex items-center gap-1 rounded-lg border border-border bg-app/60 p-0.5 text-xs">
           <button type="button" aria-pressed={method !== 'klein'} onClick={() => setMethod('auto')}

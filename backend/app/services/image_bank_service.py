@@ -1994,7 +1994,7 @@ def _watermark_job(bank_id, rescan):
         bank_jobs.progress(job, done=0, total=len(rows), detail='watermark scan')
         if not rows:
             return
-        detected = clean = errors = checked = 0
+        detected = clean = errors = checked = unanswered = 0
         with gpu_exclusive_vision_window(flag_ttl=1800):
             try:
                 for i, row in enumerate(rows, 1):
@@ -2023,6 +2023,12 @@ def _watermark_job(bank_id, rescan):
                     # state untouched so a retry can finish it (same reasoning as
                     # the dataset detector), never falsely mark everything clean.
                     if not (raw or '').strip():
+                        # COUNTED, not merely skipped: a pass where every image
+                        # came back empty reported "done — 0 with a watermark,
+                        # 0 clean", which reads as "looked at them all, found
+                        # nothing" when in truth nothing could be looked at. The
+                        # rows stay unscanned on purpose — the report must say so.
+                        unanswered += 1
                         bank_jobs.bump(job)
                         continue
                     bbox = _parse_watermark_bbox(raw)
@@ -2047,6 +2053,9 @@ def _watermark_job(bank_id, rescan):
                                            f'so far')
             return
         detail = f'done — {detected} with a watermark, {clean} clean'
+        if unanswered:
+            detail += (f', {unanswered} not analysed (the vision model returned '
+                       'nothing — check Ollama in Settings, then run it again)')
         if errors:
             detail += f', {errors} unreadable'
         bank_jobs.progress(job, detail=detail)

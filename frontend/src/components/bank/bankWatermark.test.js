@@ -26,10 +26,13 @@ test('level 1 is live whenever something is croppable — it needs no model at a
   assert.match(s.label, /Auto-crop \(1\)/);
 });
 
-test('level 1 off with marks left says to escalate, not just "disabled"', () => {
+test('crop off with marks left says to escalate, not just "disabled"', () => {
   const s = cropLevelState(levels({ croppable: 0 }));
   assert.equal(s.disabled, true);
-  assert.match(s.reason, /level 2/i);
+  // Points at INPAINT. Once Find became level 1 this hint still said "level 2",
+  // i.e. it sent the user back to the very card they were reading.
+  assert.match(s.reason, /level 3/i);
+  assert.doesNotMatch(s.reason, /level 2/i);
 });
 
 test('level 1 off with nothing flagged points at the scan', () => {
@@ -150,3 +153,4 @@ test('find survives a missing payload (bank never scanned)', () => {
   assert.equal(s.done, 0);
   assert.equal(s.label, '🚩 Find watermarks');
 });
+
