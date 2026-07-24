@@ -47,6 +47,14 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-24-bank-review-one-by-one',
+    date: '2026-07-24',
+    title: '▶ Triage a bank at speed — one full-size image, Keep / Reject / Skip',
+    blurb:
+      'Judging a photo from a 140-pixel thumbnail was never really possible, so the last call always meant opening files by hand. The bank now has a review mode: hit "▶ Review one by one" above the grid and the images of your current filter come up full size, one after the other. ✓ Keep, ✕ Reject and ⏭ Skip each save and jump straight to the next — K, R and S on the keyboard, ←/→ to move without deciding, Esc to leave. Skip means "not now": the image stays undecided, and doesn\'t come back in that run. Tick 🎲 Random order and it walks what\'s left shuffled instead of in folder order — on a scraped dump of 3 000 shots that\'s the difference between 200 near-identical frames in a row and a representative sample from the first click; nothing you have already seen is ever shown twice. Each decision is saved on the spot, so closing after fifty of them keeps all fifty, and the counters at the top follow along.',
+    to: '/bank',
+  },
+  {
     id: '2026-07-24-bank-folder-auto-refresh',
     date: '2026-07-24',
     title: '🗃️ Images you add to a bank\'s folder now show up on their own',

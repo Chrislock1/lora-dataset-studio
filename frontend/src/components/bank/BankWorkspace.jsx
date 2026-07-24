@@ -8,6 +8,7 @@ import DeleteRejectedDialog from './DeleteRejectedDialog'
 import LaunchAllDialog from './LaunchAllDialog'
 import PipelineReport from './PipelineReport'
 import FolderSyncNote from './FolderSyncNote'
+import BankReviewLightbox from './BankReviewLightbox'
 // Source-folder re-walk messages (pure/testable).
 import { folderSyncToast } from './bankSync.js'
 // Reuse the dataset's register list so the Bank lane never drifts from it.
@@ -257,9 +258,11 @@ function CoveragePanel({ coverage, onClose }) {
   )
 }
 
-function Tile({ img, bankId, selected, onToggle, size }) {
-  const badge = (txt, cls) => (
-    <span className={`rounded px-1 py-px text-[10px] font-semibold leading-none ${cls}`}>{txt}</span>
+function Tile({ img, bankId, selected, onToggle, onReview, size }) {
+  // `key` matters only for the flags list below (the one mapped array) — it was
+  // missing and logged a React warning on every bank grid render.
+  const badge = (txt, cls, key) => (
+    <span key={key} className={`rounded px-1 py-px text-[10px] font-semibold leading-none ${cls}`}>{txt}</span>
   )
   return (
     <li className={`relative overflow-hidden rounded-lg border border-border bg-surface ${STATUS_RING[img.status] || ''}`}>
@@ -284,7 +287,7 @@ function Tile({ img, bankId, selected, onToggle, size }) {
         {img.status === 'keep' && badge('✓', 'bg-emerald-500/80 text-white')}
         {img.status === 'reject' && badge(`✕ ${img.reject_reason || ''}`.trim(), 'bg-rose-500/80 text-white')}
         {img.promoted_dataset_id != null && badge('⬆', 'bg-indigo-500/80 text-white')}
-        {img.flags.map((f) => badge(FLAG_LABEL[f]?.slice(0, 2) || f, 'bg-black/60 text-amber-200'))}
+        {img.flags.map((f) => badge(FLAG_LABEL[f]?.slice(0, 2) || f, 'bg-black/60 text-amber-200', f))}
         {img.face_cluster != null && badge(`👤${img.face_cluster}`, 'bg-black/60 text-sky-200')}
         {img.framing && badge(`📐${img.framing}`, 'bg-black/60 text-teal-200')}
         {img.style_cluster != null && badge(`🎨${img.style_cluster}`, 'bg-black/60 text-fuchsia-200')}
@@ -292,6 +295,13 @@ function Tile({ img, bankId, selected, onToggle, size }) {
         {img.semantic_dup_group != null && badge(`✂${img.semantic_dup_group}`, 'bg-black/60 text-orange-200')}
         {img.caption && badge('🏷️', 'bg-black/60 text-emerald-200')}
       </span>
+      {/* ▶ starts the fast-triage lightbox AT this image. It's a separate hit
+          target on purpose: the tile's own click still (de)selects for the bulk
+          ✓/✕/⬆ bar, so neither use loses its gesture. */}
+      <button type="button" onClick={onReview}
+        title="Review from this image — full size, one at a time, with Keep/Reject/Skip"
+        aria-label={`Review from ${img.name}`}
+        className="absolute bottom-1 right-6 rounded bg-black/60 px-1 text-[11px] text-white hover:bg-black/80">▶</button>
       <a href={`/api/bank/${bankId}/file/${img.id}`} target="_blank" rel="noreferrer"
         title="Open the original file" aria-label={`Open ${img.name} full size`}
         className="absolute bottom-1 right-1 rounded bg-black/60 px-1 text-[11px] text-white no-underline hover:bg-black/80">⛶</a>
@@ -336,6 +346,12 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
   // on demand (and refreshed whenever it's open and the bank changes).
   const [coverageOpen, setCoverageOpen] = useState(false)
   const [coverage, setCoverage] = useState(null)
+  // ▶ Review — the fast-triage lightbox. `review` holds the SNAPSHOT of ids it
+  // walks ({ids, startId}); null when closed. Snapshotting at open is the whole
+  // point: a decision drops the image out of the current filter, so a live list
+  // would reorder under the cursor and make the run skip or loop.
+  const [review, setReview] = useState(null)
+  const [reviewLoading, setReviewLoading] = useState(false)
   const activityWasLive = useRef(false)
 
   const loadCoverage = useCallback(async () => {
@@ -529,6 +545,33 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
       toast.success(`Auto-reject: ${n} image(s) rejected (${flags.join(', ')}). Manual ✓/✕ untouched.`)
     }
   }
+
+  // Open ▶ Review over what the user is actually looking at: the whole current
+  // filter (all pages, current sort), or the selection when the "Show selected"
+  // view is on. `startId` (the ▶ on a tile) opens on that image.
+  const openReview = async (startId = null) => {
+    setReviewLoading(true)
+    try {
+      const ids = showSelected
+        ? ((selectedOrder && selectedOrder.length) ? selectedOrder : [...selected])
+        : await fetchAllIds(bankId, filterParams(filter))
+      if (!ids.length) {
+        toast.info('Nothing to review — no image matches the current filter.')
+        return
+      }
+      setReview({ ids, startId })
+    } catch (e) {
+      toast.error(e?.message || 'Could not build the review list.')
+    } finally {
+      setReviewLoading(false)
+    }
+  }
+
+  // One decision landed in the lightbox — refresh the header counters so
+  // kept/rejected/undecided track the run live. The grid is refreshed once, on
+  // close, so its tiles don't shuffle around behind the lightbox.
+  const onReviewDecided = () => { refreshPayload() }
+  const closeReview = () => { setReview(null); refreshPayload(); refreshImages() }
 
   const selectAllCurrent = async () => {
     try {
@@ -963,6 +1006,15 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
           )}
         </span>
         <span aria-hidden className="h-4 w-px bg-border" />
+        {/* The fast lane: full-size, one image at a time, Keep/Reject/Skip with
+            K/R/S. Deliberately a button of its own rather than a tile gesture —
+            the tile click stays the bulk-selection gesture it has always been. */}
+        <button type="button" onClick={() => openReview(null)} disabled={reviewLoading}
+          title="Review the images of this filter one at a time, full size: ✓ Keep / ✕ Reject / ⏭ Skip (K/R/S) each move to the next. Optional random order."
+          className="rounded-md border border-indigo-400/60 bg-indigo-500/20 px-2.5 py-0.5 text-xs font-semibold text-indigo-200 disabled:opacity-50 hover:bg-indigo-500/30">
+          {reviewLoading ? '▶ Preparing…' : '▶ Review one by one'}
+        </button>
+        <span aria-hidden className="h-4 w-px bg-border" />
         <span className="text-content-muted">{selected.size} selected</span>
         <button type="button" onClick={selectAllCurrent}
           className="rounded-md border border-border px-2 py-0.5 text-xs text-content-muted hover:text-content hover:bg-surface-raised">
@@ -1158,6 +1210,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             {page.images.map((img) => (
               <Tile key={img.id} img={img} bankId={bankId} size={tileSize}
                 selected={selected.has(img.id)}
+                onReview={() => openReview(img.id)}
                 onToggle={() => setSelected((prev) => {
                   const next = new Set(prev)
                   if (next.has(img.id)) next.delete(img.id); else next.add(img.id)
@@ -1200,6 +1253,11 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
       {launchOpen && (
         <LaunchAllDialog caps={caps} visionReady={visionReady}
           onClose={() => setLaunchOpen(false)} onLaunch={startPipeline} />
+      )}
+
+      {review && (
+        <BankReviewLightbox bankId={bankId} ids={review.ids} startId={review.startId}
+          seedImages={page.images} onDecided={onReviewDecided} onClose={closeReview} />
       )}
     </div>
   )

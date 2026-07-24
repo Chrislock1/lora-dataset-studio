@@ -244,6 +244,36 @@ rarely needs a description on every shot). Stop it any time — and when you com
 back, a saved report at the top of the bank tells you exactly what ran, what was
 skipped and why, with the headline counts.
 
+## Review a bank one image at a time
+
+Filter chips and bulk actions clear the obvious trash, but the last call —
+*is this shot good enough for the LoRA?* — is made one image at a time, and
+squinting at a 140-pixel thumbnail is not how you make it. **▶ Review one by
+one** (above the grid) opens the images of the **current filter** full size, one
+after the other:
+
+- **✓ Keep**, **✕ Reject**, **⏭ Skip** — each one saves and jumps straight to the
+  next image. The keyboard is the point: **K** keep, **R** reject, **S** skip,
+  **←/→** move without deciding, **Esc** to leave. A few hundred images go by in
+  minutes.
+- **⏭ Skip** decides nothing (the image stays undecided) but is not shown again
+  in that run — it's "not now", not "no".
+- **🎲 Random order** walks what's left in shuffled order instead of folder
+  order. On a scraped dump of 3 000 photos, sequential order means 200
+  near-identical frames in a row; random gives you a representative sample from
+  the first click. Ticking or unticking it mid-run only re-orders what you have
+  **not** seen yet — nothing you already judged comes back.
+- Under the image, the facts the passes already computed (resolution, sharpness,
+  aesthetic score, NSFW, quality flags, person and duplicate groups) so you can
+  call it without leaving the lightbox.
+- The counter is honest — *12 / 340* over the snapshot taken when you opened the
+  review, so a decision that drops the image out of the filter can't make the
+  run skip images or loop. Each decision is saved on the spot: close after fifty
+  of them and all fifty are there.
+
+The ▶ button on a tile starts the same review **at that image**. A plain click
+on a tile still selects it for the bulk ✓/✕/⬆ bar, so both ways of working stay.
+
 ## Tips that save runs
 
 - Trust the composition meter over your instinct — a set that "looks varied"

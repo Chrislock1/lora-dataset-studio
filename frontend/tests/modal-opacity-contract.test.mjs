@@ -32,6 +32,7 @@ const IMAGE_VIEWER_ALLOWLIST = new Set([
   'ResultLightbox.jsx',
   'WatermarkReviewLightbox.jsx',
   'QuickVoteModal.jsx',        // fullscreen bg-black/95 image vote
+  'BankReviewLightbox.jsx',    // fullscreen bg-black/95 bank triage viewer
 ])
 
 // Opaque panel tokens (alpha-free surfaces a card can be built on).
