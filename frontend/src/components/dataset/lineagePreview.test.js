@@ -5,7 +5,7 @@ import {
   describePreviewSelection, parseSeedInput,
   checkpointDeployed, lineageImportPayload,
   lineageDeletePayload, checkpointDeleteTarget, checkpointIsBestSettings,
-  describeCheckpointDelete,
+  checkpointUndeployAction, describeCheckpointDelete,
 } from './lineagePreview.js';
 
 const pills = new Map([
@@ -185,6 +185,34 @@ test('checkpointDeleteTarget: nothing to delete → no action', () => {
   // a cloud run still syncing epochs down keeps its saves
   const training = { source: 'cloud', run_id: 7, status: 'training', train_type: 'zimage' };
   assert.equal(checkpointDeleteTarget(training, { step: 1, filename: 'a.safetensors' }), null);
+});
+
+test('checkpointUndeployAction: same file as the deployed target, reversible wording', () => {
+  const node = { source: 'local', train_type: 'sdxl', variant: 'base', base_model: 'b' };
+  const pill = { step: 1000, filename: 'lora_001000.safetensors', testable: true,
+    deployed_filename: 'sdxl/lora_nova_000001000_rl7.safetensors' };
+  const target = checkpointDeleteTarget(node, pill);
+  const undeploy = checkpointUndeployAction(node, pill);
+  // The invariant: the explicit ⏏ Undeploy is the SAME operation the delete
+  // target already described — route and body identical, only the framing differs.
+  assert.equal(undeploy.path, target.path);
+  assert.deepEqual(undeploy.body, target.body);
+  assert.equal(undeploy.filename, target.filename);
+  assert.equal(undeploy.label, 'Undeploy');
+  assert.match(undeploy.title, /Reversible/);
+  assert.match(undeploy.title, /deploy it again/);
+});
+
+test('checkpointUndeployAction: nothing to undeploy on a pill that is not deployed', () => {
+  const node = { source: 'local', train_type: 'sdxl', variant: 'base', base_model: 'b' };
+  // a plain pill has a delete target, but it aims at the SAVE — never an undeploy
+  assert.equal(checkpointUndeployAction(node, { step: 1, filename: 'a.safetensors' }), null);
+  // deployed but the ComfyUI copy's own name is unknown → no action at all
+  assert.equal(checkpointUndeployAction(node, { step: 1, filename: 'a.safetensors', testable: true }), null);
+  // a cloud run still syncing: the whole pill offers nothing
+  const training = { source: 'cloud', run_id: 7, status: 'training', train_type: 'zimage' };
+  assert.equal(checkpointUndeployAction(training,
+    { step: 1, filename: 'a.safetensors', testable: true, deployed_filename: 'z image/a.safetensors' }), null);
 });
 
 test('describeCheckpointDelete names the target of the moment and what survives', () => {

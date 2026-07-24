@@ -14,7 +14,7 @@ import {
   checkpointKey, toggleCheckpointSelection, selectedCheckpointRefs,
   describePreviewSelection, parseSeedInput,
   checkpointDeployed, lineageImportPayload,
-  checkpointDeleteTarget, describeCheckpointDelete,
+  checkpointDeleteTarget, checkpointUndeployAction, describeCheckpointDelete,
 } from './lineagePreview.js';
 
 /* ◉ Graph view of a run's lineage — the showcase rendering. A tidy left-to-right
@@ -366,7 +366,7 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
     try {
       await postJson(`/api/dataset/${datasetId}/${target.path}`, target.body);
       toast.success(target.kind === 'deployed'
-        ? `Removed from ComfyUI (training save kept): ${target.filename}`
+        ? `Undeployed from ComfyUI — the training save is kept, you can deploy it again: ${target.filename}`
         : `Training save moved to the trash: ${target.filename}`);
       setOpenCk(null);
       if (typeof refetchTree === 'function') {
@@ -672,6 +672,9 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
           // Height budget grew with the 🗑 row, so the flip-above / clamp
           // geometry still keeps the whole popover inside the scroll panel.
           const POP_W = 210, POP_H = 182;
+          // A deployed pill's ONE action on its ComfyUI copy, shown as ⏏ Undeploy
+          // next to "✓ Deployed" (see below) instead of buried in the 🗑 row.
+          const undeploy = checkpointUndeployAction(openCk.node, openCk.pill);
           const below = openCk.pill.y + openCk.pill.h + 4;
           const py = below + POP_H > g.height ? Math.max(0, openCk.pill.y - POP_H - 4) : below;
           const px = Math.max(0, Math.min(openCk.pill.x, g.width - POP_W));
@@ -709,13 +712,27 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
                     <span aria-hidden>▶</span> Continue from here
                   </button>
                 )}
-                {/* 📦 Import → loras/<family>: deploy on the spot. Already-deployed
-                    pills show "✓ Deployed" instead (nothing to do twice). Only
-                    importable pills (a file + a resolvable run) offer the button. */}
+                {/* 📦 Import → loras/<family>: deploy on the spot. A deployed pill
+                    shows "✓ Deployed" — and, right beside it, the SYMMETRIC ⏏
+                    Undeploy, framed as what it is: reversible (the training save
+                    stays, so the pill goes straight back to offering Import). It
+                    aims at the same ComfyUI copy the 🗑 row used to hide, which is
+                    why that row only appears for the save (below). Only importable
+                    pills (a file + a resolvable run) offer the Import button. */}
                 {checkpointDeployed(openCk.pill) ? (
-                  <span className="flex items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-600/10 px-2 py-1 text-emerald-200 text-[0.6875rem] font-medium">
-                    <span aria-hidden>✓</span> Deployed
-                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="flex flex-1 items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-600/10 px-2 py-1 text-emerald-200 text-[0.6875rem] font-medium">
+                      <span aria-hidden>✓</span> Deployed
+                    </span>
+                    {undeploy && (
+                      <button type="button" disabled={deleting}
+                        onClick={() => handleDeleteCheckpoint(openCk.node, openCk.pill)}
+                        title={undeploy.title}
+                        className="flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-600/5 px-2 py-1 text-emerald-200/90 text-[0.6875rem] font-medium hover:bg-emerald-600/20 disabled:cursor-not-allowed disabled:opacity-50">
+                        <span aria-hidden>⏏</span> {deleting ? 'Undeploying…' : undeploy.label}
+                      </button>
+                    )}
+                  </div>
                 ) : lineageImportPayload(openCk.node, openCk.pill) ? (
                   <button type="button" disabled={importing}
                     onClick={() => handleImport(openCk.node, openCk.pill)}
@@ -724,14 +741,17 @@ export default function RunLineageGraph({ tree, onSelect, onContinueCheckpoint,
                     <span aria-hidden>📦</span> {importing ? 'Importing…' : `Import → ${loraFolderLabel(openCk.node.train_type)}`}
                   </button>
                 ) : null}
-                {/* 🗑 Destructive, so VISUALLY IN RETREAT below a hairline: a
+                {/* 🗑 The one truly DESTRUCTIVE action — deleting the training
+                    save — so it stays VISUALLY IN RETREAT below a hairline: a
                     quiet text row, not a fourth coloured button one clicks by
-                    reflex. Its LABEL names the file it would delete right now —
-                    the ComfyUI copy while the pill is deployed, the training
-                    save once it isn't — so the two are never confused. */}
+                    reflex. While the pill is deployed there is no save to offer
+                    yet (undeploy first — same progressive order as before), and
+                    the ComfyUI copy is handled above by ⏏ Undeploy; the row is
+                    therefore drawn only for kind==='save'. Its LABEL still names
+                    exactly the file the click deletes. */}
                 {(() => {
                   const target = checkpointDeleteTarget(openCk.node, openCk.pill);
-                  if (!target) return null;
+                  if (!target || target.kind !== 'save') return null;
                   return (
                     <button type="button" disabled={deleting}
                       onClick={() => handleDeleteCheckpoint(openCk.node, openCk.pill)}

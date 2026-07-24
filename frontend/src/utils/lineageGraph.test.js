@@ -266,6 +266,26 @@ test('big-preview mode sizes the pills up and grows the cell height', () => {
   assert.ok(big.height > compact.height);
 });
 
+test('a deployed pill keeps the name of its ComfyUI copy', () => {
+  // Regression: the layout used to drop `deployed_filename`, which is the ONLY
+  // handle the popover has on the deployed copy — so ⏏ Undeploy (and the 🗑 it
+  // grew out of) silently disappeared from every deployed pill, whatever the
+  // server sent. The field must survive the pill build.
+  const g = buildLineageGraph({
+    root_id: 1, current_id: 1, single: true,
+    nodes: [{ record_id: 1, parent_record_id: null, is_current: true,
+      checkpoints: [
+        ck(1000),
+        ck(1500, { testable: true, deployed_filename: 'z image/lora_nova_000001500_rc96_v1.safetensors' }),
+      ] }],
+    edges: [],
+  });
+  const [plain, deployed] = g.nodes[0].checkpoints;
+  assert.equal(deployed.testable, true);
+  assert.equal(deployed.deployed_filename, 'z image/lora_nova_000001500_rc96_v1.safetensors');
+  assert.equal(plain.deployed_filename, null);   // never invented for a plain pill
+});
+
 test('empty / missing payloads return a safe empty shape', () => {
   for (const bad of [null, undefined, {}, { nodes: [] }]) {
     const g = buildLineageGraph(bad);

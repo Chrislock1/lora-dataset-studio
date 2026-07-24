@@ -196,6 +196,11 @@ export function buildLineageGraph(tree, { bigPreviews = false } = {}) {
         // Lab inline generation: whether this checkpoint has a deployed LoRA the
         // engine can preview, and its generated preview (url + async status).
         testable: c.testable === true,
+        // …and, when it IS deployed, the ComfyUI copy's own name. Without it the
+        // popover can address that copy at all: ⏏ Undeploy (and the 🗑 it grew
+        // out of) resolve their target from this field, so dropping it here made
+        // every deployed pill a dead end no matter what the server sent.
+        deployed_filename: c.deployed_filename || null,
         preview_url: c.preview_url || null, preview_status: c.preview_status || null,
         x: x + dx, y: y + dy, w: m.pillW, h: m.pillH, isResumeSource: false };
     });

@@ -261,6 +261,16 @@ const TOPICS = [
      'too many epochs', 'graph delete', 'pill delete', 'does it delete my lora',
      'imported lora kept', 'best settings warning'],
     '/datasets?section=checkpoints', 'dataset-guide', '6-after-training-pick-the-right-checkpoint'),
+  action('lineage-undeploy-checkpoint', 'Undeploy a LoRA from ComfyUI (reversible)',
+    ['undeploy', 'undeploy lora', 'remove from comfyui', 'unimport', 'un-deploy',
+     'deployed badge', 'no undeploy button', 'take it out of comfyui', 'redeploy',
+     'deploy again', 'training save kept', 'reversible'],
+    '/datasets?section=checkpoints', 'dataset-guide', '6-after-training-pick-the-right-checkpoint'),
+  action('runs-clean-one-run-staging', 'Clean ONE run\'s staging folder',
+    ['clean run', 'clean one run', 'staging', 'staging folder', 'disk', 'disk space',
+     'gb on disk', 'how big is this run', 'free space', 'purge run', 'clean finished runs',
+     'trash', 'empty the trash', 'nothing was freed', 'cleanup did nothing'],
+    '/cloud', 'troubleshooting', 'a-cloud-run-seems-stuck'),
 
   // ---- Settings: per-field topics (kind 'setting') -----------------------
   // engines

@@ -143,7 +143,24 @@ test('the pill delete aims at what the pill SHOWS — deployed copy vs training 
   assert.match(graph, /catch \(e\) \{\s*toast\.error\(e\?\.message \|\| 'Delete failed'\);/);
   // The pill must stop lying: same refetch path the import success uses, so a
   // just-undeployed pill flips to "not deployed" (next click aims at the save).
-  assert.match(graph, /Removed from ComfyUI \(training save kept\)[^]*?refetchTree\(\)/);
+  assert.match(graph, /Undeployed from ComfyUI[^]*?refetchTree\(\)/);
+});
+
+test('undeploy is EXPLICIT and symmetric with deploy — and never confusable with delete', () => {
+  const helpers = fs.readFileSync(new URL('./lineagePreview.js', import.meta.url), 'utf8');
+  // ⏏ Undeploy sits next to "✓ Deployed", where 📦 Import sits when it isn't —
+  // no longer only reachable through the retreat row.
+  assert.match(graph, /✓<\/span> Deployed/);
+  assert.match(graph, /⏏<\/span> \{deleting \? 'Undeploying…' : undeploy\.label\}/);
+  assert.match(graph, /const undeploy = checkpointUndeployAction\(openCk\.node, openCk\.pill\);/);
+  // It is DERIVED from the single delete target, so its label can never name one
+  // file while the click posts another (the invariant of this popover).
+  assert.match(helpers, /export function checkpointUndeployAction[^]*?checkpointDeleteTarget\(node, pill\)/);
+  assert.match(helpers, /target\.kind !== 'deployed'\) return null;/);
+  // The 🗑 retreat row is now reserved for the one destructive action: the save.
+  assert.match(graph, /!target \|\| target\.kind !== 'save'\) return null;/);
+  // Undeploy is presented as REVERSIBLE — the save survives and can be re-deployed.
+  assert.match(helpers, /Reversible: the training save is kept/);
 });
 
 test('the lineage payload carries the deployed copy name from the testable map', () => {

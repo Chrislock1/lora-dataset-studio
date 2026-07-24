@@ -47,6 +47,22 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-24-per-run-staging-cleanup',
+    date: '2026-07-24',
+    title: '🧹 See what each training run weighs on disk — and clean just that one',
+    blurb:
+      'Every finished run on the Runs page now shows how much disk its staging folder still holds ("8.2 GB on disk"), with a 🧹 button to move just that run to the trash — no more all-or-nothing cleanup of a whole history. Runs still training, and pods kept for manual recovery, are left alone exactly as before. The messages are honest too: the trash lives on the same disk, so they now tell you to empty it in Settings to actually reclaim the space, and "nothing to clean" no longer looks like a failed click.',
+    to: '/cloud',
+  },
+  {
+    id: '2026-07-24-explicit-undeploy',
+    date: '2026-07-24',
+    title: '⏏ Undeploy a LoRA from ComfyUI without fearing you are deleting it',
+    blurb:
+      'In the run graph, a deployed checkpoint used to be a dead end: a "✓ Deployed" badge, and the only way back was a discreet 🗑 that read like destruction. It now offers ⏏ Undeploy right next to that badge — the exact counterpart of 📦 Import, and reversible: only the ComfyUI copy is removed, your training save stays and can be deployed again any time. The 🗑 stays where it belongs, for deleting the training save itself.',
+    to: '/cloud',
+  },
+  {
     id: '2026-07-24-subject-type-selector',
     date: '2026-07-24',
     title: '🐾 Build LoRAs of animals, objects and creatures — not just people',

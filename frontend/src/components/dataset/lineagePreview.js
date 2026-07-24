@@ -165,6 +165,28 @@ export function checkpointDeleteTarget(node, pill) {
   };
 }
 
+/* The UNDEPLOY action of a deployed pill — the exact counterpart of 📦 Import,
+   and the SAME operation checkpointDeleteTarget already describes for a deployed
+   pill (same route, same body, same file). Only the framing changes, because the
+   framing was the whole problem: removing the ComfyUI copy is REVERSIBLE (the
+   training save stays, the pill goes back to offering "Import → loras/…"), yet it
+   was only reachable through a 🗑 row that reads as destruction, so users
+   concluded the app had a deploy button and no undeploy.
+
+   Deriving it from checkpointDeleteTarget (rather than rebuilding a body) is what
+   keeps the invariant: there is one target per pill, and every label naming the
+   ComfyUI copy is aiming at the ComfyUI copy. Returns null whenever the deployed
+   copy can't be addressed — the pill then keeps a plain "✓ Deployed" chip. */
+export function checkpointUndeployAction(node, pill) {
+  const target = checkpointDeleteTarget(node, pill);
+  if (!target || target.kind !== 'deployed') return null;
+  return {
+    ...target,
+    label: 'Undeploy',
+    title: 'Remove this LoRA from ComfyUI\'s loras folder. Reversible: the training save is kept, so you can deploy it again from this checkpoint at any time.',
+  };
+}
+
 /* Is this checkpoint the one pinned as the dataset's ★ best settings in the Test
    Studio? Compared on the BASENAME, exactly like the flat list's guard-rail: the
    pin stores the deployed LoRA's path, the pill stores the run-dir filename, and
@@ -196,9 +218,9 @@ export function describeCheckpointDelete(node, pill, { bestSettingsLora = null }
       : '⚠ This save is the one pinned as this dataset\'s ★ BEST SETTINGS in the Test Studio.', '');
   }
   if (target.kind === 'deployed') {
-    lines.push(`REMOVE FROM COMFYUI — “${target.filename}”${step}?`, '',
+    lines.push(`UNDEPLOY — REMOVE FROM COMFYUI — “${target.filename}”${step}?`, '',
       'Only the copy imported into ComfyUI goes to the trash (recoverable until you empty it in Settings).',
-      'The training save in the run folder is KEPT — this frees no space there. Once removed, this checkpoint offers to delete that save instead.');
+      'The training save in the run folder is KEPT — this frees no space there. Once removed, this checkpoint offers to deploy again (📦 Import), or to delete that save instead.');
   } else {
     lines.push(`DELETE THE TRAINING SAVE — “${target.filename}”${step}?`, '',
       'This is the run\'s own checkpoint file, not a ComfyUI copy (this checkpoint isn\'t imported).',
