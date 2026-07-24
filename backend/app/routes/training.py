@@ -310,17 +310,30 @@ def dataset_train_checkpoints(dataset_id):
                            .filter_by(dataset_id=dataset_id).all()))
     checkpoint_registry.ensure_baseline(LOCAL_USER, dataset_id, fam_resolved,
                                         had_training)
-    return jsonify({'checkpoints': lt.list_checkpoints(LOCAL_USER, dataset_id, **kw),
+    # Deployment stamp (testable + deployed_filename) on EVERY listed save, from
+    # the same join the ◉ Graph pills use — this is what lets the panel show
+    # "✓ Deployed + ⏏ Undeploy" in place of a misleading second "Import →", and
+    # aim the undeploy at the right ComfyUI file. Local rows name their own run,
+    # so they are grouped by run; a cloud group IS one run.
+    local_cks = ct.annotate_deployed_by_run(
+        dataset_id, fam_resolved, lt.list_checkpoints(LOCAL_USER, dataset_id, **kw))
+    cloud_groups = ct.cloud_checkpoint_groups(dataset_id, fam_resolved, variant=variant)
+    for _g in cloud_groups:
+        ct.annotate_deployed_checkpoints(dataset_id, fam_resolved,
+                                         _g.get('checkpoints') or [],
+                                         run_tag=('cloud', _g.get('run_id')))
+    return jsonify({'checkpoints': local_cks,
                     # cloud saves synced locally (incl. an ACTIVE run's latest)
                     # — separate field: the resume-or-fresh prompt reasons on
                     # LOCAL checkpoints only
-                    'cloud_checkpoints': ct.cloud_checkpoints(
-                        dataset_id, fam_resolved, variant=variant),
+                    'cloud_checkpoints': ct.annotate_deployed_by_run(
+                        dataset_id, fam_resolved,
+                        [dict(c, run_source='cloud') for c in ct.cloud_checkpoints(
+                            dataset_id, fam_resolved, variant=variant)]),
                     # same saves grouped BY SOURCE RUN (id/status/gpu/cost/time)
                     # so the panel labels which run produced which epochs and
                     # deep-links each group back to its Runs row
-                    'cloud_checkpoint_groups': ct.cloud_checkpoint_groups(
-                        dataset_id, fam_resolved, variant=variant),
+                    'cloud_checkpoint_groups': cloud_groups,
                     'recommended_steps': lt.recommended_steps(
                         dataset_id, train_type=fam_resolved, variant=variant),
                     'recommended_steps_info': lt.recommended_steps_info(

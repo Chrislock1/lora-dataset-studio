@@ -19,6 +19,11 @@ import {
 } from '../../utils/checkpointBrowser';
 import { confirmableRetryFlag } from '../../utils/trainingRefusals';
 import {
+  deployedFilenamesOf,
+  orphanImportedCheckpoints,
+  panelCheckpointDeployment,
+} from '../../utils/checkpointDeployment';
+import {
   describeZImageRecipe,
   isLongZImageTurboRun,
   ZIMAGE_TURBO_LONG_RUN_STEPS,
@@ -904,13 +909,83 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
     const best = ds.data?.best_settings;
     const isBest = best?.lora_filename
       && String(best.lora_filename).split(/[\\/]/).pop() === String(filename).split(/[\\/]/).pop();
+    // It goes to the TRASH (delete_imported_checkpoint), so the confirmation must
+    // not claim a permanent deletion — and must say what it does NOT touch.
     const msg = isBest
-      ? `⚠ “${label}” is the LoRA saved as this dataset's ★ BEST SETTINGS in the Test Studio.\n\nDelete it anyway? The saved combo will stop working.`
-      : `Permanently delete “${label}” from ComfyUI's ${checkpointLorasLabel} folder?`;
+      ? `⚠ “${label}” is the LoRA saved as this dataset's ★ BEST SETTINGS in the Test Studio.\n\nUndeploy it anyway? The saved combo will stop working.`
+      : `Undeploy “${label}” from ComfyUI's ${checkpointLorasLabel} folder?\n\nOnly the ComfyUI copy goes to the trash (recoverable until you empty it in Settings). Any training save it came from is kept.`;
     if (!window.confirm(msg)) return;
     await ds.deleteCheckpoint(filename, checkpointTrainType, checkpointVariant);
     loadCheckpoints();
   };
+  // ⏏ Undeploy, in place, next to the checkpoint it came from — the symmetric
+  // counterpart of 📦 Import and the SAME operation the ◉ Graph offers: the
+  // route, body and target file all come from the shared helper (which derives
+  // them from checkpointDeleteTarget), so no second undeploy logic exists here.
+  // Only the ComfyUI copy goes to the trash; the training save stays, which is
+  // why the confirmation says so and the button is not painted as destruction.
+  const [undeploying, setUndeploying] = useState(null);   // deployed filename
+  const undeployCheckpoint = async (dep) => {
+    if (!dep?.undeploy) return;
+    const msg = dep.confirmMessage();
+    if (msg && !window.confirm(msg)) return;
+    setUndeploying(dep.undeploy.filename);
+    try {
+      const d = await postTrain(`/api/dataset/${ds.currentId}/${dep.undeploy.path}`,
+                                dep.undeploy.body);
+      if (d.ok === false) toastTrainError(d, 'Undeploy failed');
+      else toast.success(`Undeployed from ComfyUI — the training save is kept, you can deploy it again: ${dep.undeploy.filename}`);
+    } finally {
+      setUndeploying(null);
+      loadCheckpoints(checkpointBase, checkpointTrainType, checkpointVariant);
+    }
+  };
+  /* The ONE control that says where a checkpoint stands with ComfyUI: 📦 Import
+     when it isn't deployed, "✓ Deployed" + ⏏ Undeploy when it is. Rendered
+     identically at both call sites (this run's saves and the cloud runs' saves)
+     so the two lists cannot drift apart — and identically to the ◉ Graph pills,
+     which is the point of this alignment. A deployed checkpoint no longer offers
+     a second "Import →" that would just overwrite itself. */
+  const renderDeployControl = (c, { onImport, importTitle } = {}) => {
+    const dep = panelCheckpointDeployment(c, {
+      trainType: checkpointTrainType,
+      variant: c.variant || checkpointVariant,
+      baseModel: checkpointBase,
+    });
+    if (!dep.deployed) {
+      return (
+        <button type="button" onClick={onImport} title={importTitle}
+          className="ml-auto px-2 py-0.5 rounded bg-primary/20 border border-primary/40 text-white">
+          Import → {checkpointLorasLabel}
+        </button>
+      );
+    }
+    const deployedName = dep.undeploy?.filename || dep.pill.deployed_filename || '';
+    return (
+      <span className="ml-auto flex items-center gap-1">
+        <span title={`Already in ComfyUI's ${checkpointLorasLabel} folder${deployedName ? ` as “${deployedName}”` : ''}`}
+          className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/10 text-emerald-200">
+          ✓ Deployed
+        </span>
+        {dep.undeploy && (
+          <button type="button" onClick={() => undeployCheckpoint(dep)}
+            disabled={undeploying === dep.undeploy.filename}
+            title={dep.undeploy.title}
+            className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/5 text-emerald-200/90 hover:bg-emerald-600/20 disabled:opacity-50">
+            {undeploying === dep.undeploy.filename ? '⏏ Undeploying…' : `⏏ ${dep.undeploy.label}`}
+          </button>
+        )}
+      </span>
+    );
+  };
+  // The deployed LoRAs that no checkpoint row above accounts for — all that is
+  // left for the "Also in ComfyUI" list once every claimed file is actionable in
+  // place. Computed from the rows the page is actually showing, so a failed join
+  // leaves the file listed instead of unreachable.
+  const otherImported = orphanImportedCheckpoints(
+    imported,
+    deployedFilenamesOf(checkpoints, cloudCkpts,
+                        ...cloudGroups.map((g) => g.checkpoints || [])));
   const doPrepareBase = async () => {
     await ds.prepareBase(base);
     const info = await ds.trainBaseInfo();
@@ -2476,18 +2551,17 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                       🏆 recommended
                     </span>
                   )}
-                  <button type="button"
-                    onClick={async () => {
-                      // await + refresh: the import must show up in "IN COMFYUI"
-                      // without a manual Refresh click (user-observed). finally:
-                      // the list refreshes even if the import failed (the error
-                      // toast comes from the hook).
+                  {renderDeployControl(c, {
+                    // await + refresh: the import must show up as deployed
+                    // without a manual Refresh click (user-observed). finally:
+                    // the list refreshes even if the import failed (the error
+                    // toast comes from the hook).
+                    onImport: async () => {
                       try { await ds.importCheckpoint(c.filename, checkpointBase, checkpointTrainType, checkpointVariant); }
                       finally { loadCheckpoints(checkpointBase, checkpointTrainType, checkpointVariant); }
-                    }}
-                    className="ml-auto px-2 py-0.5 rounded bg-primary/20 border border-primary/40 text-white">
-                    Import → {checkpointLorasLabel}
-                  </button>
+                    },
+                    importTitle: `Deploy this checkpoint into ComfyUI's ${checkpointLorasLabel} folder so you can test and generate with it`,
+                  })}
                   <button type="button"
                     onClick={async () => {
                       if (!window.confirm(`Move “${c.filename}” to the trash?\n\nRecoverable until you empty the trash in Settings.`)) return;
@@ -2580,8 +2654,8 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                       {c.active && (
                         <span className="text-sky-300/80 text-[0.625rem]">· run in progress</span>
                       )}
-                      <button type="button"
-                        onClick={async () => {
+                      {renderDeployControl(c, {
+                        onImport: async () => {
                           const d = await postTrain(`/api/dataset/${ds.currentId}/train/import`,
                             { filename: c.filename, cloud_run_id: c.run_id,
                               ...trainingRunSelection(checkpointBase, checkpointTrainType, c.variant || checkpointVariant) });
@@ -2590,11 +2664,11 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                           if (d.ok === false) toastTrainError(d, 'Import failed');
                           else toast.success(d.note || `LoRA imported: ${d.dest || c.filename}`);
                           loadCheckpoints(checkpointBase, checkpointTrainType, checkpointVariant);
-                        }}
-                        title={c.active ? 'Import the latest synced save — the run keeps training' : 'Import this cloud checkpoint into ComfyUI'}
-                        className="ml-auto px-2 py-0.5 rounded bg-primary/20 border border-primary/40 text-white">
-                        Import → {checkpointLorasLabel}
-                      </button>
+                        },
+                        importTitle: c.active
+                          ? 'Import the latest synced save — the run keeps training'
+                          : 'Import this cloud checkpoint into ComfyUI',
+                      })}
                       {!c.active && (
                         <button type="button"
                           onClick={async () => {
@@ -2623,12 +2697,20 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
             </p>
           )}
 
-          {imported.length > 0 && (
+          {/* Every deployed file the lists above ALREADY account for is now
+              actionable right next to its checkpoint (✓ Deployed / ⏏ Undeploy),
+              so repeating it here — under a red 🗑 that reads as destruction —
+              is exactly the contradiction this section used to create. What
+              stays is what nothing above explains: LoRAs imported before run
+              tagging ("run ?"), files dropped in the folder by hand, and any
+              file carrying an arch-mismatch warning (never hidden). */}
+          {otherImported.length > 0 && (
             <div className="flex flex-col gap-1">
-              <span className="text-content-muted text-[0.625rem] uppercase">
-                In ComfyUI ({checkpointLorasLabel}) — delete the ones you no longer need
+              <span className="text-content-muted text-[0.625rem] uppercase"
+                title="Deployed LoRAs that none of the checkpoints above accounts for — imported before run tagging, or copied into the folder by hand">
+                Also in ComfyUI ({checkpointLorasLabel}) — not from a checkpoint listed above
               </span>
-              {imported.map((c) => (
+              {otherImported.map((c) => (
                 <div key={c.filename} className="flex items-center gap-2 text-[0.6875rem]">
                   {/* Source run of this deployed file: two look-alike LoRAs from
                       different runs are now distinguishable at a glance. Files
@@ -2648,10 +2730,13 @@ export default function TrainingPanel({ ds, keptCount, kind, onCheckpointsChange
                       ⚠ {c.arch_label || c.arch_mismatch} LoRA
                     </span>
                   )}
+                  {/* Same operation as ⏏ Undeploy above, so it wears the same
+                      name: it moves the ComfyUI copy to the trash, it does not
+                      destroy anything permanently. */}
                   <button type="button" onClick={() => removeImported(c.filename, c.label)}
-                    title={`Delete this LoRA from ComfyUI's ${checkpointLorasLabel} folder`}
-                    className="ml-auto px-2 py-0.5 rounded bg-red-500/15 border border-red-500/40 text-red-300">
-                    🗑 Delete
+                    title={`Move this LoRA out of ComfyUI's ${checkpointLorasLabel} folder (to the trash — recoverable until you empty it in Settings)`}
+                    className="ml-auto px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-600/5 text-emerald-200/90 hover:bg-emerald-600/20">
+                    ⏏ Undeploy
                   </button>
                 </div>
               ))}

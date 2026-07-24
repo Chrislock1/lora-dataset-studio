@@ -2864,32 +2864,73 @@ def _lineage_node(rec, crun, requested_id, failed_local_id):
             node['checkpoint_ready'] = None
     _cnotes = checkpoint_notes_for(rec.id)
     _cprev = checkpoint_previews_for(rec.id)
-    # A pill is `testable` when its step maps to a deployed LoRA the Studio engine
-    # can load — the front enables Generate only for testable selections and shows
-    # the app's usual 'needs setup' hint otherwise. `preview_*` render the inline
-    # thumbnail (or its pending/failed state) in the node card.
-    # Scoped to THIS run so its step-less final deploy (`..._rc90_v2`, no step in
-    # the name) joins its own final pill instead of going unmatched.
-    _testable = _testable_by_step(rec.dataset_id, rec.family,
-                                  run_tag=_deployed_run_tag(rec),
-                                  final_step=_final_step_of(node.get('checkpoints')))
-    # The deployed copy's own name, from the SAME map that decides `testable` —
-    # so "is it deployed" and "which file would Remove-from-ComfyUI trash" can
-    # never drift apart. Resolved to the form the deployed-delete route accepts.
-    _deploy_names = _deletable_deploy_names(rec.dataset_id, rec.family) if _testable else {}
+    # Deployment (testable + the deployed copy's own name) comes from the SHARED
+    # annotator, so the graph pills and the Checkpoints panel rows answer "is this
+    # deployed, and which ComfyUI file is it?" with the same join. Scoped to THIS
+    # run so its step-less final deploy (`..._rc90_v2`, no step in the name) joins
+    # its own final pill instead of going unmatched.
+    annotate_deployed_checkpoints(rec.dataset_id, rec.family,
+                                  node.get('checkpoints') or [],
+                                  run_tag=_deployed_run_tag(rec))
     for _ck in (node.get('checkpoints') or []):
         _step = _ck.get('step')
         _ck['note'] = _cnotes.get(_step, '')
-        _ck['testable'] = _step in _testable
-        _dep = _testable.get(_step)
-        if _dep:
-            _ck['deployed_filename'] = _deploy_names.get(
-                os.path.basename(str(_dep).replace('\\', '/')).lower())
+        # `preview_*` render the inline thumbnail (or its pending/failed state).
         _pv = _cprev.get(_step)
         if _pv:
             _ck['preview_url'] = _pv.get('url')
             _ck['preview_status'] = _pv.get('status')
     return node
+
+
+def annotate_deployed_checkpoints(dataset_id, family, checkpoints,
+                                  run_tag=None) -> list:
+    """Stamp `testable` and, when deployed, `deployed_filename` onto a flat list
+    of a run's saves — IN PLACE, returning the same list.
+
+    This is THE join between "a save on disk" and "its copy in ComfyUI", and it
+    has exactly one implementation on purpose: the ◉ Graph pills and the
+    Checkpoints & LoRAs rows must never disagree about which checkpoints are
+    deployed, nor about which file an undeploy would remove. `testable` decides
+    "✓ Deployed vs 📦 Import"; `deployed_filename` is the ONLY handle the UI has
+    on the ComfyUI copy (without it the delete route answers "unknown checkpoint"
+    and the action is withheld) — it is resolved to the form that route accepts.
+
+    `run_tag` ((source, run_id), see _deployed_run_tag) additionally attaches a
+    run's STEP-LESS final deploy to its final save. Best-effort throughout: an
+    unreadable ComfyUI pool leaves every row "not deployed" rather than claiming
+    a deployment that isn't there."""
+    cks = list(checkpoints or [])
+    testable = _testable_by_step(dataset_id, family, run_tag=run_tag,
+                                 final_step=_final_step_of(cks))
+    names = _deletable_deploy_names(dataset_id, family) if testable else {}
+    for ck in cks:
+        step = ck.get('step')
+        ck['testable'] = step in testable
+        dep = testable.get(step)
+        if dep:
+            ck['deployed_filename'] = names.get(
+                os.path.basename(str(dep).replace('\\', '/')).lower())
+    return cks
+
+
+def annotate_deployed_by_run(dataset_id, family, checkpoints) -> list:
+    """`annotate_deployed_checkpoints` for a MIXED list whose rows name their own
+    source run (the Checkpoints panel's local list: several runs' saves in one
+    flat list). Rows are grouped by (run_source, run_id) so each group is joined
+    with ITS run tag — a step-less final save then attaches to the run that
+    produced it, never to a neighbour. Rows with no recorded run (pre-registry
+    files) are joined untagged, which still matches every step-named deploy."""
+    groups = {}
+    for ck in (checkpoints or []):
+        rid = ck.get('run_id')
+        src = ck.get('run_source')
+        key = (src, rid) if rid and src else (None, None)
+        groups.setdefault(key, []).append(ck)
+    for (src, rid), rows in groups.items():
+        annotate_deployed_checkpoints(dataset_id, family, rows,
+                                      run_tag=(src, rid) if rid else None)
+    return list(checkpoints or [])
 
 
 def run_lineage(record_id) -> dict:

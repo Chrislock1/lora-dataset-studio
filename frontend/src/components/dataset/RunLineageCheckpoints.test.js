@@ -165,9 +165,13 @@ test('undeploy is EXPLICIT and symmetric with deploy — and never confusable wi
 
 test('the lineage payload carries the deployed copy name from the testable map', () => {
   const svc = fs.readFileSync(new URL('../../../../backend/app/services/cloud_training.py', import.meta.url), 'utf8');
-  // Same map that sets `testable` also names the deployed file — no second source.
-  assert.match(svc, /_ck\['testable'\] = _step in _testable/);
-  assert.match(svc, /_ck\['deployed_filename'\] = _deploy_names\.get\(/);
+  // Same map that sets `testable` also names the deployed file — no second
+  // source. Both now live in ONE annotator, shared with the Checkpoints panel,
+  // so the two surfaces can never disagree on what is deployed.
+  assert.match(svc, /def annotate_deployed_checkpoints\(/);
+  assert.match(svc, /ck\['testable'\] = step in testable/);
+  assert.match(svc, /ck\['deployed_filename'\] = names\.get\(/);
+  assert.match(svc, /annotate_deployed_checkpoints\(rec\.dataset_id, rec\.family,/);
   // …resolved to the form the deployed-delete route whitelists.
   assert.match(svc, /def _deletable_deploy_names/);
   assert.match(svc, /lt\.list_imported_checkpoints\(cfg\.LOCAL_USER, dataset_id, family=family\)/);

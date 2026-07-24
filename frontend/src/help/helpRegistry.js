@@ -262,9 +262,13 @@ const TOPICS = [
      'imported lora kept', 'best settings warning'],
     '/datasets?section=checkpoints', 'dataset-guide', '6-after-training-pick-the-right-checkpoint'),
   action('lineage-undeploy-checkpoint', 'Undeploy a LoRA from ComfyUI (reversible)',
+    // Same topic for the ◉ Graph pills and the Checkpoints & LoRAs rows — the
+    // two surfaces now offer the SAME control, so they must not teach two answers.
     ['undeploy', 'undeploy lora', 'remove from comfyui', 'unimport', 'un-deploy',
      'deployed badge', 'no undeploy button', 'take it out of comfyui', 'redeploy',
-     'deploy again', 'training save kept', 'reversible'],
+     'deploy again', 'training save kept', 'reversible',
+     'already deployed', 'which lora is in comfyui', 'also in comfyui',
+     'import again', 'imported twice', 'orphan lora', 'run ?'],
     '/datasets?section=checkpoints', 'dataset-guide', '6-after-training-pick-the-right-checkpoint'),
   action('runs-clean-one-run-staging', 'Clean ONE run\'s staging folder',
     ['clean run', 'clean one run', 'staging', 'staging folder', 'disk', 'disk space',

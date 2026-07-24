@@ -47,6 +47,14 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-24-checkpoints-panel-deployed-state',
+    date: '2026-07-24',
+    title: '✓ The Checkpoints panel now says which LoRAs are already in ComfyUI',
+    blurb:
+      'Every checkpoint used to offer "Import → loras/…", even the ones already deployed — and the only way back out lived in a separate list under a red 🗑 that read like destruction. A deployed checkpoint now shows "✓ Deployed" with an ⏏ Undeploy right there, exactly like the run graph: reversible, your training save is kept and you can deploy it again. The list below keeps only the LoRAs no checkpoint on the page explains (imported before run tagging, or dropped in by hand).',
+    to: '/datasets?section=checkpoints',
+  },
+  {
     id: '2026-07-24-per-run-staging-cleanup',
     date: '2026-07-24',
     title: '🧹 See what each training run weighs on disk — and clean just that one',
