@@ -12,7 +12,7 @@ const levels = (over = {}) => ({
 
 test('levelCounts: a missing payload reads as zeros, never NaN', () => {
   assert.deepEqual(levelCounts(null), {
-    scanned: 0, flagged: 0, croppable: 0, inpaintable: 0,
+    scanned: 0, unscanned: 0, flagged: 0, croppable: 0, inpaintable: 0,
     cropped: 0, inpainted: 0, dismissed: 0, needsRescan: 0,
   });
   assert.equal(levelCounts({ flagged: 'x' }).flagged, 0);
@@ -108,11 +108,27 @@ test('find is offered when the vision model is ready, and names a rescan once sc
   assert.equal(fresh.disabled, false);
   assert.equal(fresh.label, '🚩 Find watermarks');
 
-  const again = findLevelState(levels(), { visionReady: true });
+  const again = findLevelState(levels({ unscanned: 0 }), { visionReady: true });
   assert.equal(again.disabled, false);
   assert.equal(again.label, '🚩 Scan again');   // a second pass is a RE-scan, say so
   assert.equal(again.done, 10);
-  assert.equal(again.remaining, 4);
+});
+
+test('a STOPPED scan says what is left, never what was flagged', () => {
+  // The regression this guards: a resumed scan looked like it restarted from
+  // zero over already-analysed images. The count that dispels it is the number
+  // left to LOOK AT (unscanned), not the number found to be watermarked.
+  const s = findLevelState(levels({ scanned: 3092, unscanned: 248, flagged: 92 }),
+    { visionReady: true });
+  assert.equal(s.done, 3092);
+  assert.equal(s.remaining, 248);               // NOT 92
+  assert.equal(s.label, '🚩 Scan the remaining 248');
+});
+
+test('a partial scan is reported as partial, not as a finished pass', () => {
+  const line = progressSummary(levels({ scanned: 4351, unscanned: 12981, flagged: 2756 }));
+  assert.match(line, /4351 of 17332 scanned/);
+  assert.match(line, /12981 still to look at/);
 });
 
 test('find is off without the vision model, and says where to get it', () => {

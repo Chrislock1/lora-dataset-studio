@@ -25,6 +25,7 @@ export function levelCounts(levels) {
   const l = levels || {};
   return {
     scanned: num(l.scanned),
+    unscanned: num(l.unscanned),
     flagged: num(l.flagged),
     croppable: num(l.croppable),
     inpaintable: num(l.inpaintable),
@@ -48,10 +49,16 @@ export function findLevelState(levels, { live = false, visionReady = false } = {
       : null;
   return {
     done: c.scanned,
-    remaining: c.flagged,
+    // What is LEFT TO SCAN — not what was flagged. Detection resumes where a
+    // stop left it, but a per-run progress bar restarting at 0 made that look
+    // like a fresh start over already-analysed images. Naming the remainder is
+    // what makes "it picked up where it stopped" visible.
+    remaining: c.unscanned,
     disabled: reason !== null,
     reason,
-    label: c.scanned > 0 ? '🚩 Scan again' : '🚩 Find watermarks',
+    label: c.unscanned > 0 && c.scanned > 0
+      ? `🚩 Scan the remaining ${c.unscanned}`
+      : c.scanned > 0 ? '🚩 Scan again' : '🚩 Find watermarks',
   };
 }
 
@@ -117,6 +124,12 @@ export function hasCleanedImages(levels) {
 export function progressSummary(levels) {
   const c = levelCounts(levels);
   if (c.scanned === 0) return 'Not scanned yet — run 🚩 Find watermarks to flag the marked images.';
+  // A PARTIAL scan must say so first. Reporting "N still flagged" while
+  // thousands of images were never looked at reads as a finished pass, and it
+  // is the same misreading that makes a resumed scan look like it started over.
+  const partial = c.unscanned > 0
+    ? `${c.scanned} of ${c.scanned + c.unscanned} scanned — ${c.unscanned} still to look at. `
+    : '';
   const done = [];
   if (c.cropped) done.push(`${c.cropped} cropped`);
   if (c.inpainted) done.push(`${c.inpainted} repainted`);
@@ -124,7 +137,7 @@ export function progressSummary(levels) {
   const left = c.flagged === 0
     ? 'nothing left flagged'
     : `${c.flagged} still flagged (${c.croppable} croppable, ${c.inpaintable} to repaint)`;
-  return done.length ? `${done.join(', ')} — ${left}.` : `${left}.`;
+  return partial + (done.length ? `${done.join(', ')} — ${left}.` : `${left}.`);
 }
 
 /** Rows a previous build flagged without keeping the box: they are invisible to

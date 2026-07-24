@@ -2413,6 +2413,12 @@ def watermark_levels(user_id, bank_id) -> dict | None:
             croppable += 1
     return {
         'scanned': base.filter(BankImage.watermark_state.isnot(None)).count(),
+        # What a plain re-run would still look at. Detection resumes where it
+        # stopped (the pass commits every 25 rows), but nothing said so: a
+        # progress bar that restarts at 0 each run reads as "it started over
+        # and is re-analysing what I already did". This is the number that
+        # answers that, so the panel can say "N left to scan" out loud.
+        'unscanned': _watermark_scan_query(bank_id, rescan=False).count(),
         'flagged': flagged,
         'croppable': croppable,
         'inpaintable': flagged - croppable,
