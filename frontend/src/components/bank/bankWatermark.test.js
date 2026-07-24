@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  cropLevelState, hasCleanedImages, inpaintLevelState, levelCounts,
+  cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState, levelCounts,
   progressSummary, rescanNote,
 } from './bankWatermark.js';
 
@@ -95,4 +95,42 @@ test('undo only offered once something was actually cleaned', () => {
 test('images flagged before boxes were stored are named, never silently stuck', () => {
   assert.equal(rescanNote(levels()), null);
   assert.match(rescanNote(levels({ needs_rescan: 7 })), /7 image\(s\).*Find watermarks again/);
+});
+
+
+// --- step 1: FIND -----------------------------------------------------------
+// Detection belongs to the same ladder as the two cleaning levels: it is what
+// records the box they route on. Splitting it off the panel is what made the
+// feature read as two unrelated things, so its state is modelled here too.
+
+test('find is offered when the vision model is ready, and names a rescan once scanned', () => {
+  const fresh = findLevelState(levels({ scanned: 0, flagged: 0 }), { visionReady: true });
+  assert.equal(fresh.disabled, false);
+  assert.equal(fresh.label, '🚩 Find watermarks');
+
+  const again = findLevelState(levels(), { visionReady: true });
+  assert.equal(again.disabled, false);
+  assert.equal(again.label, '🚩 Scan again');   // a second pass is a RE-scan, say so
+  assert.equal(again.done, 10);
+  assert.equal(again.remaining, 4);
+});
+
+test('find is off without the vision model, and says where to get it', () => {
+  const s = findLevelState(levels(), { visionReady: false });
+  assert.equal(s.disabled, true);
+  assert.match(s.reason, /vision model/i);
+  assert.match(s.reason, /Settings/);           // actionable, never a bare "unavailable"
+});
+
+test('find is off while another pass runs on the bank', () => {
+  const s = findLevelState(levels(), { visionReady: true, live: true });
+  assert.equal(s.disabled, true);
+  assert.match(s.reason, /already running/i);
+});
+
+test('find survives a missing payload (bank never scanned)', () => {
+  const s = findLevelState(null, { visionReady: true });
+  assert.equal(s.disabled, false);
+  assert.equal(s.done, 0);
+  assert.equal(s.label, '🚩 Find watermarks');
 });

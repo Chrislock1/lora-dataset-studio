@@ -35,6 +35,26 @@ export function levelCounts(levels) {
   };
 }
 
+/** Step 1 — FIND. Detection is the first rung of the same ladder, not a pass
+ * that lives elsewhere: the two cleaning levels are dead without it (they route
+ * on the box it stores), and splitting them across the page is what made the
+ * feature read as two unrelated things. Needs the vision model. */
+export function findLevelState(levels, { live = false, visionReady = false } = {}) {
+  const c = levelCounts(levels);
+  const reason = live
+    ? 'A pass is already running on this bank — wait for it to finish.'
+    : !visionReady
+      ? 'Pull the vision model (Settings ▸ Captioning & quality) to scan for watermarks.'
+      : null;
+  return {
+    done: c.scanned,
+    remaining: c.flagged,
+    disabled: reason !== null,
+    reason,
+    label: c.scanned > 0 ? '🚩 Scan again' : '🚩 Find watermarks',
+  };
+}
+
 /** Level 1 — auto-crop. Always available (CPU/PIL), so the only reasons it can
  * be off are "a pass is already running" and "nothing to crop". */
 export function cropLevelState(levels, { live = false } = {}) {

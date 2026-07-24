@@ -514,7 +514,6 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
   const startScore = () => act(() => postJson(`/api/bank/${bankId}/score`, {}), null)
   const startSemanticDedup = () => act(
     () => postJson(`/api/bank/${bankId}/semantic-dedup`, {}), null)
-  const startWatermark = () => act(() => postJson(`/api/bank/${bankId}/watermark`, {}), null)
   const startFraming = () => act(() => postJson(`/api/bank/${bankId}/framing`, {}), null)
   const startCaption = () => act(
     () => postJson(`/api/bank/${bankId}/caption`, {
@@ -759,12 +758,6 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
               ? 'Rate every non-rejected image for aesthetics (1–10), flag NSFW, and group by visual style — one CLIP pass. Powers a smarter "keep best". GPU when available; runs in the background.'
               : 'Install the Bank scoring extra (Setup ▸ Quality tools) to score aesthetics / NSFW / style'}>
             ✨ Score{!caps.bank_scoring && ' (needs setup)'}
-          </PassButton>
-          <PassButton onClick={startWatermark} disabled={live || !visionReady}
-            title={visionReady
-              ? 'Scan every non-rejected image for an overlaid watermark/logo/URL with the same Qwen3-VL detector the datasets use (detection only — the bank never edits your files). GPU vision pass.'
-              : 'Pull the vision model (Settings ▸ Captioning & quality) to scan for watermarks'}>
-            🚩 Find watermarks{!visionReady && ' (needs setup)'}
           </PassButton>
           <PassButton onClick={startFraming} disabled={live || !visionReady}
             title={visionReady

@@ -20,7 +20,8 @@ import { apiFetch, postJson } from '../../api/fetchClient'
 import { useCapabilities } from '../../context/CapabilitiesContext'
 import { useToast } from '../common/Toast'
 import {
-  cropLevelState, hasCleanedImages, inpaintLevelState, progressSummary, rescanNote,
+  cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState,
+  progressSummary, rescanNote,
 } from './bankWatermark.js'
 
 // How many cleaned images the before/after strip offers. A sample is enough to
@@ -80,6 +81,7 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
     }
   }
 
+  const find = findLevelState(levels, { live, visionReady: !!caps.ollama?.vision_model_ready })
   const crop = cropLevelState(levels, { live })
   const inpaint = inpaintLevelState(levels, {
     live,
@@ -97,20 +99,24 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
     <div id="bank-watermark-cleaning" data-workspace-focus
       className="space-y-2 rounded-lg border border-border bg-surface-raised p-3">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <h3 className="text-sm font-semibold text-content">🚩 Clean the watermarks</h3>
+        <h3 className="text-sm font-semibold text-content">🚩 Watermarks</h3>
         <span className="text-[0.6875rem] text-content-subtle">
-          in two manual steps — your original files are never modified
+          find them, then clear them in two manual steps — your original files are never modified
         </span>
       </div>
       <p className="text-xs text-content-subtle">{progressSummary(levels)}</p>
       {note && <p className="text-xs text-amber-300/90">⚠️ {note}</p>}
 
       <div className="flex flex-wrap gap-2">
-        <LevelCard index={1} title="Crop it off" state={crop}
+        <LevelCard index={1} title="Find them" state={find}
+          blurb="Scans every non-rejected image for an overlaid logo/URL and records WHERE it sits — the two steps below route on that box."
+          onRun={() => run(`/api/bank/${bankId}/watermark`, {},
+            '🚩 Watermark scan started — Stop any time.')} />
+        <LevelCard index={2} title="Crop it off" state={crop}
           blurb="Cuts the border strip holding the mark. No model, no GPU, and no invented pixel — try this one first."
           onRun={() => run(`/api/bank/${bankId}/watermark/crop`, {},
             '✂ Auto-crop started — Stop any time.')} />
-        <LevelCard index={2} title="Repaint what's left" state={inpaint}
+        <LevelCard index={3} title="Repaint what's left" state={inpaint}
           blurb="Repaints the marks a crop can't remove. LaMa is fast; Klein is slower but also clears marks on the subject."
           onRun={() => run(`/api/bank/${bankId}/watermark/inpaint`, { method },
             '🧽 Inpainting started — Stop any time.')} />
