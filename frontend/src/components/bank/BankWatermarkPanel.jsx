@@ -21,7 +21,7 @@ import { useCapabilities } from '../../context/CapabilitiesContext'
 import { useToast } from '../common/Toast'
 import {
   cropLevelState, findLevelState, hasCleanedImages, inpaintLevelState,
-  progressSummary, rescanNote,
+  levelCounts, progressSummary, rescanNote,
 } from './bankWatermark.js'
 
 // How many cleaned images the before/after strip offers. A sample is enough to
@@ -95,15 +95,34 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
   // judge a pass, and no extra endpoint just to list them.
   const sample = (levels?.cleaned_sample || []).slice(0, COMPARE_SAMPLE)
 
+  // COLLAPSED BY DEFAULT: watermarks are an occasional errand, not the reason
+  // this page is open — an always-expanded three-card panel pushed the grid down
+  // on every visit, and off a phone screen entirely. The closed header still
+  // carries the state (how many flagged, or that nothing is scanned), so folding
+  // it hides the controls, never the situation. Anything needing attention
+  // (rows a rescan must adopt) opens it on its own.
+  const [open, setOpen] = useState(false)
+  useEffect(() => { if (note) setOpen(true) }, [note])
+  const c = levelCounts(levels)
+  const headline = c.scanned === 0
+    ? 'not scanned'
+    : c.flagged > 0 ? `${c.flagged} flagged` : 'nothing flagged'
+
   return (
     <div id="bank-watermark-cleaning" data-workspace-focus
-      className="space-y-2 rounded-lg border border-border bg-surface-raised p-3">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <h3 className="text-sm font-semibold text-content">🚩 Watermarks</h3>
-        <span className="text-[0.6875rem] text-content-subtle">
-          find them, then clear them in two manual steps — your original files are never modified
-        </span>
-      </div>
+      className="rounded-lg border border-border bg-surface-raised">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 p-3 text-left">
+        <span className="text-sm font-semibold text-content">🚩 Watermarks</span>
+        <span className="text-[0.6875rem] text-content-subtle">{headline}</span>
+        {note && <span aria-hidden className="text-[0.6875rem] text-amber-300/90">⚠️</span>}
+        <span aria-hidden className="ml-auto text-xs text-content-subtle">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+      <div className="space-y-2 px-3 pb-3">
+      <p className="text-[0.6875rem] text-content-subtle">
+        find them, then clear them in two manual steps — your original files are never modified
+      </p>
       <p className="text-xs text-content-subtle">{progressSummary(levels)}</p>
       {note && <p className="text-xs text-amber-300/90">⚠️ {note}</p>}
 
@@ -179,6 +198,8 @@ export default function BankWatermarkPanel({ bankId, live, onChanged }) {
             ))}
           </ul>
         </div>
+      )}
+      </div>
       )}
     </div>
   )
