@@ -144,7 +144,13 @@ touching the folder itself:
 1. **Create a bank** — give it a name and paste the folder path. The app
    inventories every image in place (subfolders included). Nothing is copied,
    nothing is modified; rejecting an image is a reversible status, never a file
-   deletion.
+   deletion. The folder stays LIVE: keep dropping images into it and they are
+   picked up automatically the next time you open the bank list or the bank
+   itself ("42 new image(s) found in the folder"), as undecided images ready
+   for the next scan — your existing keep/reject decisions, scores and captions
+   are never touched. Files you removed from the folder are reported at the top
+   of the bank, never deleted from it, so an unplugged drive can't wipe your
+   triage.
 2. **🔎 Scan quality** — a background pass (CPU only, a few minutes even on
    thousands of images) scores every file: sharpness, noise, flat/empty
    frames, resolution — and groups **near-duplicates**. The flags follow the

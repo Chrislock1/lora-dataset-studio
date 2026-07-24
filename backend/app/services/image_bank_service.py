@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -142,6 +143,130 @@ def create_bank(user_id, name, folder):
             db.session.flush()
     db.session.commit()
     return bank, len(rels)
+
+
+# --- folder sync (incremental re-inventory) ---------------------------------
+# A bank points at a LIVE folder: the user keeps scraping/exporting into it long
+# after the bank was created. Re-walking it is cheap (~5 ms for 3 000 files), so
+# the app does it for them instead of making them rebuild a bank they have
+# already triaged. The cooldown is not about CPU — it keeps the workspace's 2 s
+# poll from hitting the disk (possibly a spun-down external drive) constantly.
+FOLDER_SYNC_COOLDOWN = 60.0
+_folder_sync = {}       # bank_id -> {'at': monotonic, 'result': {...}}
+_EMPTY_SYNC = {'added': 0, 'missing': 0, 'unavailable': False, 'error': None}
+
+
+def reset_folder_sync():
+    """Drop the per-bank walk cooldowns (tests: bank ids restart at 1 with an
+    in-memory DB, so a stale entry would silently skip the next test's walk)."""
+    _folder_sync.clear()
+
+
+def _sync_cached(bank_id) -> dict:
+    """The last known folder state, with ``added`` zeroed — nothing was added by
+    the call that is being answered from the cache."""
+    last = _folder_sync.get(bank_id)
+    return {**(last['result'] if last else _EMPTY_SYNC), 'added': 0}
+
+
+def refresh_bank(user_id, bank_id, force=False) -> dict | None:
+    """Re-inventory a bank's source folder: register the images that appeared in
+    it since the last walk.
+
+    STRICTLY ADDITIVE — the only write is an INSERT of relpaths we don't know
+    yet. No row is ever deleted and no decision is ever reset (status, scores,
+    quality_state, duplicate/semantic groups, captions, face verdicts), so a
+    bank triaged over hours survives any number of refreshes. New rows land
+    exactly like freshly inventoried ones (pending, unscanned), which is all the
+    downstream passes need: the quality scan already only picks up rows with no
+    quality_state, and it rebuilds the duplicate groups when it lands.
+
+    Files that VANISHED from the folder are counted, never removed: an unplugged
+    drive or a renamed folder would otherwise wipe a whole triage in one silent
+    pass. The count is surfaced so the user can decide.
+
+    Returns {'added', 'missing', 'unavailable', 'error'}, or None when the bank
+    is unknown. ``force`` bypasses the cooldown (bank opened by hand)."""
+    bank = get_bank(user_id, bank_id)
+    if bank is None:
+        return None
+    now = time.monotonic()
+    last = _folder_sync.get(bank_id)
+    if not force and last and (now - last['at']) < FOLDER_SYNC_COOLDOWN:
+        return _sync_cached(bank_id)
+    # A live pass owns this bank's rows (the scan job works off a snapshot of
+    # them and reports progress against a fixed total). Adding rows underneath
+    # it is harmless for the data but would silently fall outside that total —
+    # the next refresh, a second later, picks them up.
+    if bank_jobs.running(bank_id):
+        return _sync_cached(bank_id)
+
+    folder = bank.source_path
+    if not folder or not os.path.isdir(folder):
+        return _remember_sync(bank_id, now, {**_EMPTY_SYNC, 'unavailable': True})
+
+    known = {os.path.normcase(rel) for (rel,) in
+             db.session.query(BankImage.relpath).filter_by(bank_id=bank_id)}
+    seen, new_rels = set(), []
+    try:
+        for root, _dirs, files in os.walk(folder, onerror=lambda _e: None):
+            for f in files:
+                if not f.lower().endswith(IMG_EXTS):
+                    continue
+                rel = os.path.relpath(os.path.join(root, f), folder)
+                key = os.path.normcase(rel)
+                seen.add(key)
+                if key not in known:
+                    new_rels.append(rel)
+    except OSError:
+        # The folder went away mid-walk (drive unplugged) — report it and keep
+        # every row: a partial walk must never be read as "these files are gone".
+        return _remember_sync(bank_id, now, {**_EMPTY_SYNC, 'unavailable': True})
+
+    error = None
+    if new_rels and len(known) + len(new_rels) > BANK_MAX_FILES:
+        # Same sanity cap as create_bank, applied to the TOTAL after the add.
+        # Nothing is inserted: a half-imported folder is worse than an honest no.
+        new_rels, error = [], (f'the folder now holds more than {BANK_MAX_FILES} '
+                               'images — the new files were not added')
+    new_rels.sort()
+    for i, rel in enumerate(new_rels, 1):
+        try:
+            size = os.path.getsize(os.path.join(folder, rel))
+        except OSError:
+            size = None
+        db.session.add(BankImage(bank_id=bank_id, relpath=rel, file_size=size))
+        if i % 500 == 0:
+            db.session.flush()
+    if new_rels:
+        db.session.commit()
+    return _remember_sync(bank_id, now, {
+        'added': len(new_rels),
+        'missing': sum(1 for k in known if k not in seen),
+        'unavailable': False, 'error': error})
+
+
+def _remember_sync(bank_id, at, result) -> dict:
+    _folder_sync[bank_id] = {'at': at, 'result': result}
+    return dict(result)
+
+
+def refresh_banks(user_id, force=False) -> dict:
+    """refresh_bank() over every bank of the user — {bank_id: result}. Used by
+    the bank list, which is loaded when the user NAVIGATES to the page (never
+    polled), so it forces the walk: opening the tab right after dropping files
+    in a folder must show them, and the cooldown would swallow that. Measured on
+    a real library of 6 banks / 22 000 images: ~175 ms in total, the bulk of it
+    one 15 800-image bank. A bank whose folder is unavailable simply reports it;
+    it never fails the list."""
+    out = {}
+    ids = [row.id for row in ImageBank.query.with_entities(ImageBank.id)
+           .filter_by(user_id=user_id).all()]
+    for bank_id in ids:
+        res = refresh_bank(user_id, bank_id, force=force)
+        if res is not None:
+            out[bank_id] = res
+    return out
 
 
 def _is_imported_source(path) -> bool:

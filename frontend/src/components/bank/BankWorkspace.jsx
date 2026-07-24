@@ -7,6 +7,9 @@ import PromoteDialog from './PromoteDialog'
 import DeleteRejectedDialog from './DeleteRejectedDialog'
 import LaunchAllDialog from './LaunchAllDialog'
 import PipelineReport from './PipelineReport'
+import FolderSyncNote from './FolderSyncNote'
+// Source-folder re-walk messages (pure/testable).
+import { folderSyncToast } from './bankSync.js'
 // Reuse the dataset's register list so the Bank lane never drifts from it.
 import { VOCABULARY_OPTIONS } from '../dataset/CaptionOptionsPopover'
 // Ordered zone model + the "what's next" accent, both pure/testable.
@@ -341,16 +344,28 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
     } catch { /* transient — the panel keeps its last read */ }
   }, [bankId])
 
-  const refreshPayload = useCallback(async () => {
+  // The grid refresher, held in a ref: the folder walk below can add images at
+  // any poll, and refreshImages is defined after refreshPayload.
+  const refreshImagesRef = useRef(null)
+
+  const refreshPayload = useCallback(async (opts = {}) => {
     try {
-      const d = await apiFetch(`/api/bank/${bankId}`)
+      // ?refresh=1 forces the source-folder re-walk (the bank was just opened);
+      // a plain poll lets the server's cooldown decide, so the 2 s job poll
+      // doesn't hammer the disk.
+      const d = await apiFetch(`/api/bank/${bankId}${opts.force ? '?refresh=1' : ''}`)
       setPayload(d)
+      // Images dropped in the folder show up on their own — say it, and pull
+      // them into the grid, so the counters never move without a reason.
+      const note = folderSyncToast(d.folder_sync)
+      if (note) toast[note.type](note.text)
+      if ((d.folder_sync?.added || 0) > 0) refreshImagesRef.current?.()
       return d
     } catch (e) {
       if (String(e?.message || '').includes('not found')) { onGone?.(); return null }
       return null
     }
-  }, [bankId, onGone])
+  }, [bankId, onGone, toast])
 
   const filterParams = useCallback((f) => {
     const params = {}
@@ -387,8 +402,10 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
     } catch { /* transient — next poll retries */ }
   }, [bankId, filter, offset, filterParams, showSelected, selectedOrder])
 
+  useEffect(() => { refreshImagesRef.current = refreshImages }, [refreshImages])
+
   useEffect(() => {
-    refreshPayload(); refreshImages()
+    refreshPayload({ force: true }); refreshImages()
     apiFetch(`/api/bank/${bankId}/subfolders`)
       .then((d) => setSubfolders(d.subfolders || []))
       .catch(() => setSubfolders([]))
@@ -636,6 +653,7 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             {payload.source_path}
           </p>
         )}
+        <FolderSyncNote sync={payload?.folder_sync} />
         {counts && (
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-t border-border pt-2 text-sm">
             <Stat label="images" value={counts.total} />

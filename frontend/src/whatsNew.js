@@ -47,6 +47,14 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-24-bank-folder-auto-refresh',
+    date: '2026-07-24',
+    title: '🗃️ Images you add to a bank\'s folder now show up on their own',
+    blurb:
+      'A bank used to be a snapshot: whatever was in the folder the day you created it, forever. Keep scraping into that folder and the new shots simply never appeared — the only way in was to rebuild the bank and lose your triage. The folder is now re-walked automatically when you open the bank list or a bank, and anything new joins it as undecided ("42 new image(s) found in the folder"), ready for the next scan. Strictly additive: not one keep, reject, score or caption is touched. Files you removed from the folder are reported, never deleted from the bank — a disconnected drive can\'t erase your work.',
+    to: '/bank',
+  },
+  {
     id: '2026-07-24-checkpoints-panel-deployed-state',
     date: '2026-07-24',
     title: '✓ The Checkpoints panel now says which LoRAs are already in ComfyUI',

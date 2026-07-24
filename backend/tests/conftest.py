@@ -30,13 +30,19 @@ def _reset_inmemory_registries():
     process, not the request). With :memory: DBs each test restarts dataset ids at
     1, so a batch a PRIOR test began on 'dataset 1' would look live to the next
     test's fresh 'dataset 1' — enough to make the kind-switch guard 409 spuriously.
-    Clear it around every test so in-memory activity never leaks across cases."""
+    Clear it around every test so in-memory activity never leaks across cases.
+
+    The bank folder-sync cooldowns are process-global for the same reason: bank
+    id 1 of a prior test would make the next test's first walk a no-op."""
     from app.services import bank_jobs, dataset_activity
+    from app.services import image_bank_service
     dataset_activity.reset()
     bank_jobs.reset()
+    image_bank_service.reset_folder_sync()
     yield
     dataset_activity.reset()
     bank_jobs.reset()
+    image_bank_service.reset_folder_sync()
 
 @pytest.fixture()
 def app(tmp_path, monkeypatch):

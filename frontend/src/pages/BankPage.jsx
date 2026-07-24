@@ -5,6 +5,8 @@ import { HelpBadge } from '../help/HelpMode'
 import BankWorkspace from '../components/bank/BankWorkspace'
 import FolderPickerField from '../components/common/FolderPicker'
 import { hiddenCount, previewSlots } from '../components/bank/bankPreview'
+import { bankListSyncToast } from '../components/bank/bankSync'
+import FolderSyncNote from '../components/bank/FolderSyncNote'
 
 const CURRENT_KEY = 'bankCurrentId'
 
@@ -58,6 +60,10 @@ export default function BankPage() {
     try {
       const d = await apiFetch('/api/banks')
       setBanks(d.banks || [])
+      // The server re-walked every source folder before answering: say so when
+      // it found something, so the counters never move without an explanation.
+      const note = bankListSyncToast(d.banks)
+      if (note) toast.success(note.text)
     } catch (e) {
       toast.error(e?.message || 'Could not load the banks.')
       setBanks([])
@@ -169,6 +175,7 @@ export default function BankPage() {
               <p className="text-xs text-content-muted">
                 {b.total} image(s) · {b.scanned} scanned · <span className="text-emerald-300">{b.keep} kept</span> · <span className="text-rose-300">{b.reject} rejected</span>
               </p>
+              <FolderSyncNote sync={b.folder_sync} />
               <button type="button" onClick={() => open(b.id)}
                 className="self-start rounded-md border border-border bg-surface-raised px-3 py-1 text-xs font-semibold text-content hover:bg-surface">
                 Open →

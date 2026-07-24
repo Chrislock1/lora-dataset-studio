@@ -28,9 +28,19 @@ def banks_list():
     """Every bank + its card previews. ?dataset_id=<id> additionally embeds each
     bank's promotable count for that dataset, so the dataset-side bank chooser
     opens on ONE request instead of one per bank. An unknown/junk dataset_id
-    simply omits the field (never a 400: the list itself is still valid)."""
-    return jsonify({'banks': banks.list_banks(
-        LOCAL_USER, dataset_id=request.args.get('dataset_id') or None)})
+    simply omits the field (never a 400: the list itself is still valid).
+
+    Every bank's source folder is re-walked first (see refresh_bank): a bank
+    points at a LIVE folder, so images dropped in it after the bank was created
+    show up here instead of needing a rebuild. Strictly additive, ~5 ms a bank,
+    and the per-bank outcome rides back in ``folder_sync`` so the UI can say why
+    the counters moved."""
+    sync = banks.refresh_banks(LOCAL_USER, force=True)
+    rows = banks.list_banks(
+        LOCAL_USER, dataset_id=request.args.get('dataset_id') or None)
+    for row in rows:
+        row['folder_sync'] = sync.get(row['id'])
+    return jsonify({'banks': rows})
 
 
 @bp.post('/bank/create')
@@ -65,9 +75,16 @@ def bank_from_dataset():
 
 @bp.get('/bank/<int:bank_id>')
 def bank_get(bank_id):
+    """The workspace payload. The source folder is re-walked first so images
+    added to it show up while the bank is open — cooldown-limited, because this
+    route is ALSO the 2 s job poll. ?refresh=1 forces the walk (the workspace
+    sends it when it opens the bank). The outcome rides in ``folder_sync``."""
+    sync = banks.refresh_bank(LOCAL_USER, bank_id,
+                              force=request.args.get('refresh') == '1')
     payload = banks.bank_payload(LOCAL_USER, bank_id)
     if payload is None:
         return jsonify({'error': 'not found'}), 404
+    payload['folder_sync'] = sync
     return jsonify(payload)
 
 
