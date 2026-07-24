@@ -274,6 +274,35 @@ after the other:
 The ▶ button on a tile starts the same review **at that image**. A plain click
 on a tile still selects it for the bulk ✓/✕/⬆ bar, so both ways of working stay.
 
+## Clean the watermarks a bank found
+
+**🚩 Find watermarks** flags the images carrying an overlaid logo, URL or
+@username. Removing them used to mean promoting the watermark into a dataset
+first and cleaning it there; the bank now does it itself, in **two steps you
+launch by hand** — cheapest and safest first:
+
+1. **✂ Auto-crop** cuts off the marks sitting in a border strip. No model, no
+   GPU, no invented pixel: it simply trims the band up to the mark, and only
+   when the image stays big enough to train on. Anything it can't crop that way
+   is left flagged, on purpose.
+2. **🧽 Inpaint** repaints what's left. **LaMa** (fast, non-generative) handles
+   small off-centre marks and leaves marks *on the subject* flagged; **Klein**
+   (slower, via ComfyUI) also clears those. Each engine says what to install
+   when it isn't ready, and the button stays off rather than failing mid-pass.
+
+Each step shows how many images it still has to work on and how many it has
+already handled, so you can see where the funnel stands. **Your source files are
+never modified** — a cleaned image is a copy the app keeps beside the bank's
+thumbnails. That copy is what the grid shows, and what **⬆ Promote** sends to
+the dataset, so a cleaned bank produces a clean dataset. **↩ Undo cleaning**
+just deletes those copies and flags the images again, and **👁 Before / after**
+flips a sample between the cleaned version and your untouched original.
+
+If a bank was scanned by an older version, its flagged images carry no recorded
+mark position; the panel says so and one more **🚩 Find watermarks** run makes
+them cleanable.
+
+
 ## Tips that save runs
 
 - Trust the composition meter over your instinct — a set that "looks varied"

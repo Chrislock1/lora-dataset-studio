@@ -95,13 +95,47 @@ def _score_cache_path(bank_id) -> Path:
 
 
 def abs_image_path(bank: ImageBank, row: BankImage) -> str | None:
-    """Absolute source path of a bank image, or None when it escapes the
-    bank's folder (belt & braces — relpaths only ever come from our own walk)."""
+    """Absolute SOURCE path of a bank image, or None when it escapes the
+    bank's folder (belt & braces — relpaths only ever come from our own walk).
+
+    ⚠️ This is the user's own file. It is READ-ONLY for us, and it is NOT what
+    the app should display or copy once a watermark has been cleaned — every
+    reader must go through resolved_image_path() instead (see its docstring)."""
     base = os.path.realpath(bank.source_path)
     full = os.path.realpath(os.path.join(base, row.relpath))
     if os.path.normcase(full).startswith(os.path.normcase(base + os.sep)):
         return full
     return None
+
+
+def _clean_dir(bank_id) -> Path:
+    """Where watermark-cleaned versions live — the bank's OWN working directory,
+    next to thumbs/. Never inside the user's folder."""
+    return _bank_dir(bank_id) / 'clean'
+
+
+def clean_image_path(bank_id, image_id) -> Path:
+    """The cleaned blob of one image (may not exist)."""
+    return _clean_dir(bank_id) / f'{image_id}.webp'
+
+
+def resolved_image_path(bank: ImageBank, row: BankImage) -> str | None:
+    """THE path every reader must use: the watermark-cleaned version when one
+    exists, the untouched source otherwise.
+
+    A bank is a read-only view over a folder we must never write to, so cleaning
+    a watermark cannot rewrite the source — it writes a separate blob under the
+    bank's working directory. That only pays off if the READERS prefer it, so
+    there is exactly ONE resolver and all three known readers call it:
+    promotion (the blob handed to import_images), the grid thumbnail, and the
+    /bank/<id>/file route. A new reader calling abs_image_path() directly would
+    silently serve the watermarked original — test_bank_watermark_clean.py
+    asserts these three go through here."""
+    if row.watermark_clean_method:
+        cleaned = clean_image_path(bank.id, row.id)
+        if cleaned.is_file():
+            return str(cleaned)
+    return abs_image_path(bank, row)
 
 
 # --- CRUD -------------------------------------------------------------------
@@ -346,6 +380,7 @@ def _image_dict(row: BankImage, th: dict) -> dict:
         'uniformity_score': row.uniformity_score,
         'aesthetic_score': row.aesthetic_score, 'nsfw_score': row.nsfw_score,
         'style_cluster': row.style_cluster, 'watermark_state': row.watermark_state,
+        'watermark_clean_method': row.watermark_clean_method,
         'subfolder': _subfolder_of(row.relpath),
         'flags': image_flags(row, th),
         'dup_group': row.dup_group,
@@ -790,13 +825,36 @@ def list_images(user_id, bank_id, status=None, flag=None, cluster=None,
 
 
 # --- thumbnails -------------------------------------------------------------
+def _thumb_path(bank_id, row: BankImage) -> Path:
+    """Where this image's thumbnail lives. A watermark-cleaned image gets its
+    OWN thumbnail file, named after the cleaning method: the cached source
+    thumbnail is never overwritten (so an undo instantly shows the original
+    again) and the grid can never serve a stale pre-clean crop. Deleting a
+    cached thumbnail in place would be the fragile version of this — on Windows
+    the file may still be held open by the response that just served it."""
+    suffix = f'.{row.watermark_clean_method}' if row.watermark_clean_method else ''
+    return _thumbs_dir(bank_id) / f'{row.id}{suffix}.webp'
+
+
+def drop_clean_thumbs(bank_id, image_id) -> None:
+    """Best-effort removal of the cleaned thumbnails of one image (an undo or a
+    re-scan just invalidated them). A leftover is harmless — nothing points at
+    it once the row carries no clean method — so a locked file is not an error."""
+    for method in ('crop', 'lama', 'klein'):
+        try:
+            (_thumbs_dir(bank_id) / f'{image_id}.{method}.webp').unlink()
+        except OSError:
+            pass
+
+
 def ensure_thumb(bank: ImageBank, row: BankImage) -> Path | None:
     """The image's grid thumbnail, generated lazily when the scan hasn't made
-    it yet (so the grid is browsable straight after inventory)."""
-    tpath = _thumbs_dir(bank.id) / f'{row.id}.webp'
+    it yet (so the grid is browsable straight after inventory). Built from the
+    RESOLVED path, so a cleaned image shows clean in the grid."""
+    tpath = _thumb_path(bank.id, row)
     if tpath.is_file():
         return tpath
-    src = abs_image_path(bank, row)
+    src = resolved_image_path(bank, row)
     if not src or not os.path.isfile(src):
         return None
     try:
@@ -1884,6 +1942,26 @@ def _score_job(bank_id):
 
 
 # --- watermark pass (reuses the dataset Qwen3-VL overlaid-mark detector) -----
+def _watermark_scan_query(bank_id, rescan):
+    """The rows the detection pass should look at.
+
+    Not a rescan = "finish the job": rows never scanned, PLUS rows flagged
+    'detected' with no bbox. The latter exist because the pass used to parse the
+    box and keep only the boolean — they would be invisible to both cleaning
+    levels forever, so a plain re-run adopts them instead of asking the user to
+    guess. 'dismissed' rows are never re-examined (the user already ruled), even
+    on a rescan — same anti-frustration rule as the dataset detector."""
+    q = (BankImage.query.filter_by(bank_id=bank_id)
+         .filter(BankImage.status != 'reject')
+         .filter(or_(BankImage.watermark_state.is_(None),
+                     BankImage.watermark_state != 'dismissed')))
+    if not rescan:
+        q = q.filter(or_(BankImage.watermark_state.is_(None),
+                         and_(BankImage.watermark_state == 'detected',
+                              BankImage.watermark_bbox.is_(None))))
+    return q
+
+
 def start_watermark(app, user_id, bank_id, rescan=False):
     """Launch the overlaid-watermark scan over the bank's non-rejected images,
     reusing the SAME Qwen3-VL detector the datasets use. Needs the vision model
@@ -1898,26 +1976,21 @@ def start_watermark(app, user_id, bank_id, rescan=False):
     reason = _gpu_busy_reason()
     if reason:
         raise RuntimeError(reason)
-    q = BankImage.query.filter_by(bank_id=bank_id).filter(BankImage.status != 'reject')
-    if not rescan:
-        q = q.filter(BankImage.watermark_state.is_(None))
     return bank_jobs.start(app, bank_id, 'watermark',
-                           _watermark_job(bank_id, rescan), total=q.count())
+                           _watermark_job(bank_id, rescan),
+                           total=_watermark_scan_query(bank_id, rescan).count())
 
 
 def _watermark_job(bank_id, rescan):
     def run(job):
+        import json as _json
         from .face_dataset_service import WATERMARK_BBOX_PROMPT, _parse_watermark_bbox
         from .vision_ollama import describe_image_ollama, unload_vision_model
         from ..gpu_window import gpu_exclusive_vision_window
         bank = db.session.get(ImageBank, bank_id)
         if not bank:
             return
-        q = (BankImage.query.filter_by(bank_id=bank_id)
-             .filter(BankImage.status != 'reject'))
-        if not rescan:
-            q = q.filter(BankImage.watermark_state.is_(None))
-        rows = q.order_by(BankImage.id.asc()).all()
+        rows = _watermark_scan_query(bank_id, rescan).order_by(BankImage.id.asc()).all()
         bank_jobs.progress(job, done=0, total=len(rows), detail='watermark scan')
         if not rows:
             return
@@ -1927,6 +2000,11 @@ def _watermark_job(bank_id, rescan):
                 for i, row in enumerate(rows, 1):
                     if bank_jobs.cancelled(job):
                         break
+                    # Always detect on the SOURCE pixels: a re-scan of an already
+                    # cleaned image drops its cleaned version first (otherwise we
+                    # would be asking "is there a watermark?" about our own edit).
+                    if row.watermark_clean_method:
+                        _discard_clean_blob(bank_id, row)
                     path = abs_image_path(bank, row)
                     if not path or not os.path.isfile(path):
                         bank_jobs.bump(job)
@@ -1947,11 +2025,15 @@ def _watermark_job(bank_id, rescan):
                     if not (raw or '').strip():
                         bank_jobs.bump(job)
                         continue
-                    if _parse_watermark_bbox(raw):
+                    bbox = _parse_watermark_bbox(raw)
+                    if bbox:
                         row.watermark_state = 'detected'
+                        # Keep the box — the crop/inpaint levels route on it.
+                        row.watermark_bbox = _json.dumps([round(v, 4) for v in bbox])
                         detected += 1
                     else:
                         row.watermark_state = 'none'
+                        row.watermark_bbox = None
                         clean += 1
                     checked += 1
                     if checked % 25 == 0:
@@ -1969,6 +2051,383 @@ def _watermark_job(bank_id, rescan):
             detail += f', {errors} unreadable'
         bank_jobs.progress(job, detail=detail)
     return run
+
+
+# --- watermark cleaning: two MANUAL levels ----------------------------------
+# The bank's folder belongs to the user and is never written to, so "cleaning a
+# watermark" here means writing a SEPARATE cleaned blob under the bank's own
+# working directory (clean/<image_id>.webp) and pointing the readers at it
+# (resolved_image_path). The original therefore stays untouched by construction,
+# which is what makes undo trivial and both levels risk-free.
+#
+# The escalation is deliberate and each level is launched BY HAND:
+#   level 1 — ✂ auto-crop: CPU/PIL, invents no pixel. Only touches marks the
+#             dataset router calls croppable (inside a border band, and the crop
+#             still leaves a usable image). Everything else is left flagged.
+#   level 2 — 🧽 inpaint: LaMa (fast, non-generative) or Klein (ComfyUI, handles
+#             on-subject marks) over what is STILL flagged. allow_crop=False, so
+#             a border mark that level 1 skipped (or that the user never cropped)
+#             is repainted rather than cropped — level 2 is the "repaint what's
+#             left" lane, not a second router.
+# Both reuse the dataset routing/engines verbatim; nothing about the decision
+# logic is re-implemented here.
+def _clean_pool_query(bank_id):
+    """Images a cleaning level can act on: still flagged, with a stored bbox,
+    not rejected. 'cleaned'/'dismissed'/'none' rows are out by construction."""
+    return (BankImage.query.filter_by(bank_id=bank_id,
+                                      watermark_state='detected')
+            .filter(BankImage.status != 'reject')
+            .filter(BankImage.watermark_bbox.isnot(None)))
+
+
+def _needs_rescan_count(bank_id) -> int:
+    """Rows flagged by an older build that kept no bbox — nothing can route them
+    until a scan re-adopts them (see _watermark_scan_query)."""
+    return (BankImage.query.filter_by(bank_id=bank_id, watermark_state='detected')
+            .filter(BankImage.status != 'reject')
+            .filter(BankImage.watermark_bbox.is_(None)).count())
+
+
+def _discard_clean_blob(bank_id, row) -> None:
+    """Forget a cleaned version: delete the blob, drop the stale thumbnail and
+    clear the method so the readers fall back to the source. No commit (the
+    caller owns the transaction)."""
+    try:
+        clean_image_path(bank_id, row.id).unlink()
+    except OSError:
+        pass
+    drop_clean_thumbs(bank_id, row.id)
+    row.watermark_clean_method = None
+
+
+def _clean_bbox(row):
+    """The stored bbox as a 4-float tuple, or None when it's unusable."""
+    try:
+        import json as _json
+        box = _json.loads(row.watermark_bbox or '')
+    except (ValueError, TypeError):
+        return None
+    if not (isinstance(box, list) and len(box) == 4):
+        return None
+    try:
+        return tuple(float(v) for v in box)
+    except (TypeError, ValueError):
+        return None
+
+
+def _source_size(bank, row):
+    """(path, W, H) of the SOURCE image, or (None, 0, 0) when unreadable."""
+    path = abs_image_path(bank, row)
+    if not path or not os.path.isfile(path):
+        return None, 0, 0
+    try:
+        with Image.open(path) as im:
+            return path, im.width, im.height
+    except (OSError, ValueError):
+        return None, 0, 0
+
+
+def _stage_clean_copy(bank_id, row, src_path) -> Path:
+    """Put a working COPY of the source in the bank's clean/ directory and return
+    it. Every editor (crop, LaMa, Klein) then works in place ON THE COPY — the
+    source path is deliberately never handed to a writer."""
+    dst = clean_image_path(bank_id, row.id)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src_path, dst)
+    return dst
+
+
+def start_watermark_crop(app, user_id, bank_id):
+    """Level 1 — crop away every watermark that sits in a border band. Pure
+    CPU/PIL, no model, no GPU: this level is always available. ValueError when
+    there is nothing to crop (the UI disables the button, this is the race)."""
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    total = _clean_pool_query(bank_id).count()
+    if not total:
+        raise ValueError('no flagged image to clean — run the watermark scan first')
+    return bank_jobs.start(app, bank_id, 'watermark_crop',
+                           _watermark_crop_job(bank_id), total=total)
+
+
+def _watermark_crop_job(bank_id):
+    def run(job):
+        from .face_dataset_service import _apply_watermark_crop, _route_watermark
+        bank = db.session.get(ImageBank, bank_id)
+        if not bank:
+            return
+        rows = _clean_pool_query(bank_id).order_by(BankImage.id.asc()).all()
+        bank_jobs.progress(job, done=0, total=len(rows), detail='auto-crop')
+        cropped = left = failed = 0
+        try:
+            for row in rows:
+                if bank_jobs.cancelled(job):
+                    break
+                bbox = _clean_bbox(row)
+                src, width, height = _source_size(bank, row)
+                if not bbox or not src:
+                    failed += 1
+                    bank_jobs.bump(job)
+                    continue
+                route, box = _route_watermark(bbox, width, height, allow_crop=True)
+                if route != 'crop':
+                    left += 1              # level 2's job — stays 'detected'
+                    bank_jobs.bump(job)
+                    continue
+                dst = _stage_clean_copy(bank_id, row, src)
+                if _apply_watermark_crop(str(dst), box):
+                    row.watermark_state = 'cleaned'
+                    row.watermark_clean_method = 'crop'
+                    drop_clean_thumbs(bank_id, row.id)
+                    cropped += 1
+                else:
+                    _discard_clean_blob(bank_id, row)
+                    failed += 1
+                if (cropped + failed) % 25 == 0:
+                    db.session.commit()
+                bank_jobs.bump(job)
+        finally:
+            db.session.commit()
+        if bank_jobs.cancelled(job):
+            bank_jobs.progress(job, detail=f'cancelled — {cropped} cropped so far')
+            return
+        detail = f'done — {cropped} cropped, {left} left for inpainting'
+        if failed:
+            detail += f', {failed} unreadable'
+        bank_jobs.progress(job, detail=detail)
+    return run
+
+
+def _watermark_inpaint_prereq(method) -> str | None:
+    """Why level 2 can't run right now, or None. Actionable text — an unavailable
+    engine must say what to install, never fail silently mid-pass."""
+    from . import watermark_klein, watermark_lama
+    if method == 'klein':
+        if not watermark_klein.is_available():
+            return ('Klein inpainting needs ComfyUI running and the Klein weights '
+                    '(Setup ▸ Generation models)')
+        return None
+    if not watermark_lama.is_available():
+        return 'LaMa inpainting is not installed (Setup ▸ Quality tools)'
+    return None
+
+
+def start_watermark_inpaint(app, user_id, bank_id, method='auto'):
+    """Level 2 — repaint what is STILL flagged after the crop level.
+    ``method``: 'auto'/'lama' (LaMa, non-generative, small off-centre marks; marks
+    on the subject stay flagged for manual review) or 'klein' (masked Flux.2 Klein
+    through ComfyUI, which also handles on-subject marks). RuntimeError (→ 503) on
+    a missing engine or a busy GPU, ValueError (→ 400) on a bad method / empty pool."""
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    method = (method or 'auto').lower()
+    if method not in ('auto', 'lama', 'klein'):
+        raise ValueError("method must be 'auto', 'lama' or 'klein'")
+    total = _clean_pool_query(bank_id).count()
+    if not total:
+        raise ValueError('nothing left to inpaint — every flagged image is handled')
+    problem = _watermark_inpaint_prereq(method)
+    if problem:
+        raise RuntimeError(problem)
+    reason = _gpu_busy_reason()
+    if reason:
+        raise RuntimeError(reason)
+    return bank_jobs.start(app, bank_id, 'watermark_inpaint',
+                           _watermark_inpaint_job(bank_id, method), total=total)
+
+
+def _watermark_inpaint_job(bank_id, method):
+    def run(job):
+        from contextlib import nullcontext
+        from . import watermark_klein, watermark_lama
+        from .face_dataset_service import _clean_inpaint_engine, _route_watermark
+        from ..gpu_window import gpu_exclusive_vision_window
+        bank = db.session.get(ImageBank, bank_id)
+        if not bank:
+            return
+        rows = _clean_pool_query(bank_id).order_by(BankImage.id.asc()).all()
+        bank_jobs.progress(job, done=0, total=len(rows), detail='inpainting')
+        counts = {'inpainted': 0, 'klein': 0, 'review': 0, 'failed': 0, 'skipped': 0}
+        error = None
+        lama_ok = watermark_lama.is_available()
+        klein_ok = method == 'klein' and watermark_klein.is_available()
+        # LaMa on the GPU pauses ComfyUI through the exclusive vision window;
+        # Klein must NOT take that window — ComfyUI owns the GPU there and
+        # holding it would deadlock its worker (same split as the dataset route).
+        device = 'cpu' if method == 'klein' else watermark_lama.resolve_device()
+        pending = []            # (row, dst_path, [bbox]) for the single LaMa batch
+        window = (gpu_exclusive_vision_window(flag_ttl=1800)
+                  if device == 'cuda' else nullcontext())
+        try:
+            with window:
+                for row in rows:
+                    if bank_jobs.cancelled(job):
+                        break
+                    bbox = _clean_bbox(row)
+                    src, width, height = _source_size(bank, row)
+                    if not bbox or not src:
+                        counts['failed'] += 1
+                        bank_jobs.bump(job)
+                        continue
+                    # allow_crop=False: level 2 REPAINTS what is left, including a
+                    # border mark the user chose not to crop.
+                    route, _box = _route_watermark(bbox, width, height, allow_crop=False)
+                    engine = _clean_inpaint_engine(route, method)
+                    if engine == 'review':
+                        counts['review'] += 1       # stays flagged, needs Klein or a human
+                        bank_jobs.bump(job)
+                        continue
+                    if (engine == 'klein' and not klein_ok) or \
+                       (engine == 'lama' and not lama_ok):
+                        counts['skipped'] += 1      # engine gone since launch
+                        bank_jobs.bump(job)
+                        continue
+                    dst = _stage_clean_copy(bank_id, row, src)
+                    if engine == 'klein':
+                        ok, err = watermark_klein.inpaint_watermark_klein(
+                            bank.user_id, str(dst), [list(bbox)])
+                        if ok:
+                            row.watermark_state = 'cleaned'
+                            row.watermark_clean_method = 'klein'
+                            drop_clean_thumbs(bank_id, row.id)
+                            counts['klein'] += 1
+                        else:
+                            _discard_clean_blob(bank_id, row)
+                            counts['skipped' if (err or {}).get('kind') == 'unavailable'
+                                   else 'failed'] += 1
+                            error = err or error
+                        db.session.commit()
+                        bank_jobs.bump(job)
+                        continue
+                    pending.append((row, dst, [list(bbox)]))
+                    bank_jobs.bump(job)
+                if pending and bank_jobs.cancelled(job):
+                    # Stop means stop: the staged copies of rows we never got to
+                    # repaint are thrown away rather than running a long batch
+                    # after the user asked out (they stay 'detected', retryable).
+                    for row, _dst, _boxes in pending:
+                        _discard_clean_blob(bank_id, row)
+                    pending = []
+                if pending:
+                    results = watermark_lama.inpaint_batch(
+                        [{'image_path': str(dst), 'bboxes': boxes}
+                         for _row, dst, boxes in pending], device=device)
+                    for row, dst, _boxes in pending:
+                        ok, err = results.get(str(dst), (
+                            False, {'kind': 'failed', 'detail': 'missing inpaint result'}))
+                        if ok:
+                            row.watermark_state = 'cleaned'
+                            row.watermark_clean_method = 'lama'
+                            drop_clean_thumbs(bank_id, row.id)
+                            counts['inpainted'] += 1
+                        else:
+                            _discard_clean_blob(bank_id, row)
+                            counts['skipped' if (err or {}).get('kind') == 'unavailable'
+                                   else 'failed'] += 1
+                            error = err or error
+        finally:
+            db.session.commit()
+        done = counts['inpainted'] + counts['klein']
+        if bank_jobs.cancelled(job):
+            bank_jobs.progress(job, detail=f'cancelled — {done} inpainted so far')
+            return
+        detail = f'done — {done} inpainted'
+        if counts['review']:
+            detail += (f", {counts['review']} on the subject "
+                       '(switch the engine to Klein to repaint those)')
+        if counts['skipped']:
+            detail += f", {counts['skipped']} skipped (engine unavailable)"
+        if counts['failed']:
+            detail += f", {counts['failed']} failed"
+            if error and error.get('detail'):
+                detail += f" — {error['detail']}"
+        bank_jobs.progress(job, detail=detail)
+    return run
+
+
+def undo_watermark_clean(user_id, bank_id, image_ids=None) -> int:
+    """Throw away cleaned versions and re-flag the images. The source was never
+    modified, so undoing is just deleting our own blob — which is exactly what
+    makes running both levels risk-free. ``image_ids`` empty = every cleaned
+    image of the bank. Returns how many rows were restored."""
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    q = BankImage.query.filter_by(bank_id=bank_id, watermark_state='cleaned')
+    if image_ids:
+        ids = [int(i) for i in image_ids]
+        q = q.filter(BankImage.id.in_(ids[:_SQL_IN_CHUNK]))
+    rows = q.all()
+    for row in rows:
+        _discard_clean_blob(bank_id, row)
+        # Back to 'detected' with its bbox intact, so it re-enters both levels
+        # (e.g. to retry with the other engine).
+        row.watermark_state = 'detected'
+    if rows:
+        db.session.commit()
+    return len(rows)
+
+
+def dismiss_watermarks(user_id, bank_id, image_ids) -> int:
+    """Rule a flag a FALSE positive: 'detected' → 'dismissed'. Those images leave
+    both cleaning levels and are never re-flagged by a later scan — without this,
+    level 2 would happily repaint a legitimate logo on a T-shirt. Mirrors the
+    dataset's dismiss_watermarks. Returns how many rows changed."""
+    bank = get_bank(user_id, bank_id)
+    if not bank:
+        raise ValueError('bank not found')
+    ids = [int(i) for i in (image_ids or [])]
+    if not ids:
+        return 0
+    rows = (BankImage.query
+            .filter_by(bank_id=bank_id, watermark_state='detected')
+            .filter(BankImage.id.in_(ids[:_SQL_IN_CHUNK])).all())
+    for row in rows:
+        row.watermark_state = 'dismissed'
+    if rows:
+        db.session.commit()
+    return len(rows)
+
+
+def watermark_levels(user_id, bank_id) -> dict | None:
+    """Where each cleaning level stands — the numbers the UI shows per level.
+    None when the bank is gone."""
+    if not get_bank(user_id, bank_id):
+        return None
+    from .face_dataset_service import _route_watermark
+    bank = db.session.get(ImageBank, bank_id)
+    base = BankImage.query.filter_by(bank_id=bank_id)
+    flagged = croppable = 0
+    for row in _clean_pool_query(bank_id).all():
+        flagged += 1
+        bbox = _clean_bbox(row)
+        # Dimensions from the scan when we have them (this runs over every flagged
+        # image of a possibly huge bank — no file is opened unless it has to be).
+        width, height = row.width, row.height
+        if not (width and height):
+            _path, width, height = _source_size(bank, row)
+        if bbox and width and _route_watermark(bbox, width, height,
+                                               allow_crop=True)[0] == 'crop':
+            croppable += 1
+    return {
+        'scanned': base.filter(BankImage.watermark_state.isnot(None)).count(),
+        'flagged': flagged,
+        'croppable': croppable,
+        'inpaintable': flagged - croppable,
+        'cropped': base.filter_by(watermark_clean_method='crop').count(),
+        'inpainted': base.filter(
+            BankImage.watermark_clean_method.in_(('lama', 'klein'))).count(),
+        'dismissed': base.filter_by(watermark_state='dismissed').count(),
+        'needs_rescan': _needs_rescan_count(bank_id),
+        # A few already-cleaned ids so the panel can offer a before/after strip
+        # (each image is served cleaned, or original with ?original=1) without a
+        # second endpoint just to list them.
+        'cleaned_sample': [r.id for r in
+                           base.filter(BankImage.watermark_clean_method.isnot(None))
+                           .order_by(BankImage.id.asc()).limit(8).all()],
+    }
 
 
 # --- framing pass (reuses the dataset face/bust/body/back classifier) -------
@@ -2791,7 +3250,9 @@ def _promote_job(user_id, bank_id, ids, dataset_id):
             chunk = rows[c0:c0 + _PROMOTE_CHUNK]
             blobs, chunk_rows, caps = [], [], []
             for r in chunk:
-                p = abs_image_path(bank, r)
+                # RESOLVED path: a watermark-cleaned image must reach the dataset
+                # cleaned, otherwise the two cleaning levels were run for nothing.
+                p = resolved_image_path(bank, r)
                 try:
                     with open(p, 'rb') as fh:
                         blobs.append(fh.read())

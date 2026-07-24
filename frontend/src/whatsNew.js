@@ -47,6 +47,13 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-24-bank-watermark-two-level-cleaning',
+    date: '2026-07-24',
+    title: '🚩 Banks can now REMOVE the watermarks they find — in two safe steps',
+    blurb:
+      'Finding the marked images in a bank was all you could do: cleaning them meant promoting the watermark into your dataset first, then cleaning there. A bank now cleans them itself, in two steps you launch by hand. Step 1 crops off the marks sitting in a border — no model, no GPU, and not a single invented pixel. Step 2 repaints whatever a crop can\'t remove, with LaMa (fast) or Klein (slower, and the only one that clears a mark on the subject). Each step shows how many images it still has to work on, so you can see how far down the funnel you are. Your own files are never modified: the cleaned version is a copy the app keeps, promoting sends that cleaned copy to the dataset, and ↩ Undo simply throws it away.',
+  },
+  {
     id: '2026-07-24-bank-review-one-by-one',
     date: '2026-07-24',
     title: '▶ Triage a bank at speed — one full-size image, Keep / Reject / Skip',

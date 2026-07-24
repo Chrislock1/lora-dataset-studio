@@ -100,6 +100,11 @@ _SCHEMA_ADDITIONS = (
     ('bank_image', 'caption', 'TEXT'),
     ('bank_image', 'semantic_dup_group', 'INTEGER'),
     ('bank_image', 'framing', 'VARCHAR(8)'),
+    # Bank watermark CLEANING (two manual levels) — the detected bbox is now kept
+    # (the scan used to parse it and throw it away) and the cleaned blob's method
+    # is recorded. Additive: existing banks keep their rows, they just carry NULLs.
+    ('bank_image', 'watermark_bbox', 'TEXT'),
+    ('bank_image', 'watermark_clean_method', 'VARCHAR(16)'),
     ('image_bank', 'pipeline_report', 'TEXT'),
 )
 

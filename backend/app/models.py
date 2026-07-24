@@ -242,9 +242,23 @@ class BankImage(db.Model):
     style_cluster = db.Column(Integer, nullable=True, index=True)
     # Watermark pass (V2): reuses the dataset Qwen3-VL overlaid-watermark detector.
     # NULL = not scanned | 'none' (clean) | 'detected' (an overlaid watermark/logo/
-    # URL was found → the read-time 'watermark' flag) | 'error'. Detection only; the
-    # bank never edits the source file (cleaning stays a dataset-side action).
+    # URL was found → the read-time 'watermark' flag) | 'error' | 'cleaned' (one of
+    # the two cleaning levels produced a clean version) | 'dismissed' (the user ruled
+    # the flag a false positive — skipped by both cleaning levels and by re-scans).
+    # The SOURCE FILE is never edited: a cleaned image is a separate blob in the
+    # bank's own working directory (see image_bank_service.clean_image_path).
     watermark_state = db.Column(String(16), nullable=True)
+    # The detected mark's normalized bbox, JSON [x1,y1,x2,y2] in 0..1 — the SAME
+    # shape the dataset stores. Persisted (the detector parses it anyway) because
+    # the two cleaning levels route on it: without a bbox there is nothing to crop
+    # or to repaint. NULL on a row scanned by a build that only kept the boolean —
+    # such rows are re-picked by the next scan (see start_watermark).
+    watermark_bbox = db.Column(Text, nullable=True)
+    # How the cleaned blob was produced: NULL = none (no cleaned version on disk) |
+    # 'crop' (level 1, PIL, invents no pixel) | 'lama' | 'klein' (level 2, inpaint).
+    # Non-NULL is what makes the readers (promote, thumbnails, the file route)
+    # prefer the cleaned blob over the untouched source.
+    watermark_clean_method = db.Column(String(16), nullable=True)
     # Caption pass — a plain DESCRIPTIVE caption (no trigger, no identity omission:
     # a bank has no trigger word and nothing to protect). It doubles as the bank's
     # search text (the search bar matches caption + relpath) AND rides along to the

@@ -204,6 +204,58 @@ def bank_watermark(bank_id):
                   rescan=bool(data.get('rescan')))
 
 
+@bp.get('/bank/<int:bank_id>/watermark/levels')
+def bank_watermark_levels(bank_id):
+    """Where each cleaning level stands: flagged / croppable / left to inpaint /
+    already cropped / already inpainted / dismissed / needing a re-scan."""
+    payload = banks.watermark_levels(LOCAL_USER, bank_id)
+    if payload is None:
+        return jsonify({'error': 'not found'}), 404
+    return jsonify(payload)
+
+
+@bp.post('/bank/<int:bank_id>/watermark/crop')
+def bank_watermark_crop(bank_id):
+    """Level 1 — crop away the border-band watermarks (CPU/PIL, invents no pixel).
+    The source folder is never written to: the crop lands in the bank's own
+    working copy. 202/409/400."""
+    return _start(banks.start_watermark_crop, _app(), LOCAL_USER, bank_id)
+
+
+@bp.post('/bank/<int:bank_id>/watermark/inpaint')
+def bank_watermark_inpaint(bank_id):
+    """Level 2 — repaint what is still flagged. {method:'auto'|'lama'|'klein'}.
+    202/409/400/503 (503 carries the actionable reason: engine missing, GPU busy)."""
+    data = request.get_json(silent=True) or {}
+    return _start(banks.start_watermark_inpaint, _app(), LOCAL_USER, bank_id,
+                  method=data.get('method') or 'auto')
+
+
+@bp.post('/bank/<int:bank_id>/watermark/undo')
+def bank_watermark_undo(bank_id):
+    """Drop the cleaned versions of {image_ids} (empty = all) and re-flag them.
+    Synchronous — it only deletes blobs we made."""
+    data = request.get_json(silent=True) or {}
+    try:
+        n = banks.undo_watermark_clean(LOCAL_USER, bank_id,
+                                       data.get('image_ids') or None)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'restored': n})
+
+
+@bp.post('/bank/<int:bank_id>/watermark/dismiss')
+def bank_watermark_dismiss(bank_id):
+    """Rule {image_ids} NOT watermarked — they leave both cleaning levels and are
+    never re-flagged by a later scan."""
+    data = request.get_json(silent=True) or {}
+    try:
+        n = banks.dismiss_watermarks(LOCAL_USER, bank_id, data.get('image_ids'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'ok': True, 'dismissed': n})
+
+
 @bp.post('/bank/<int:bank_id>/framing')
 def bank_framing(bank_id):
     """Classify every non-rejected image by shot type (face/bust/body/back),
@@ -467,10 +519,15 @@ def bank_thumb(bank_id, image_id):
 
 @bp.get('/bank/<int:bank_id>/file/<int:image_id>')
 def bank_file(bank_id, image_id):
+    """The full-size image. Serves the watermark-cleaned version when one exists;
+    ?original=1 serves the untouched source instead — that pair IS the before/after
+    comparison (no third lightbox needed)."""
     bank, row = _row_or_404(bank_id, image_id)
     if not bank or not row:
         return jsonify({'error': 'not found'}), 404
-    path = banks.abs_image_path(bank, row)
+    path = (banks.abs_image_path(bank, row)
+            if request.args.get('original') in ('1', 'true')
+            else banks.resolved_image_path(bank, row))
     if not path or not os.path.isfile(path):
         return jsonify({'error': 'file missing'}), 404
     return send_file(path, max_age=0)

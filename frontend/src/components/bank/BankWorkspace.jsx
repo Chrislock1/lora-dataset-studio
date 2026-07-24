@@ -9,6 +9,7 @@ import LaunchAllDialog from './LaunchAllDialog'
 import PipelineReport from './PipelineReport'
 import FolderSyncNote from './FolderSyncNote'
 import BankReviewLightbox from './BankReviewLightbox'
+import BankWatermarkPanel from './BankWatermarkPanel'
 // Source-folder re-walk messages (pure/testable).
 import { folderSyncToast } from './bankSync.js'
 // Reuse the dataset's register list so the Bank lane never drifts from it.
@@ -793,6 +794,11 @@ export default function BankWorkspace({ bankId, onBack, onGone }) {
             </select>
           </label>
         </div>
+        {/* Watermark CLEANING — the two manual levels (crop, then inpaint), with
+            their own per-level progress. Lives in its own component so the
+            "which level can run, and why not" logic stays unit-tested. */}
+        <BankWatermarkPanel bankId={bankId} live={live}
+          onChanged={async () => { await refreshPayload(); await refreshImages() }} />
         {captionVocab === 'explicit' && !visionModelLooksUncensored && (
           <p className="text-xs text-amber-400/90">
             ⚠️ Explicit captions need an uncensored (abliterated) Ollama vision model
