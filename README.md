@@ -662,6 +662,27 @@ docker compose up --build
 
 This builds and runs the API-only mode (see `Dockerfile` / `docker-compose.yml`) — ComfyUI and ai-toolkit are host-native tools and out of scope for the container. Data persists to `./data-docker` on the host, and your API keys are mounted in from `.env`.
 
+### Option 4 — a rented RunPod GPU pod (full stack, no local GPU)
+
+No GPU of your own, but you want the *whole* local stack rather than just the
+cloud-training lane? [`deploy/runpod/`](deploy/runpod/README.md) provisions one
+RunPod pod with the studio, **ComfyUI**, **ai-toolkit** and **Ollama** together,
+plus the Krea 2 models — so you can build a dataset and train it on the same
+machine, from one browser tab:
+
+```bash
+cd /workspace
+git clone https://github.com/perfectgf/lora-dataset-studio.git
+bash lora-dataset-studio/deploy/runpod/setup.sh
+bash lora-dataset-studio/deploy/runpod/start.sh
+```
+
+Everything installs onto the pod's network volume, so it survives a stop/start;
+setup is idempotent and resumes where it left off. The UI is served through
+RunPod's HTTPS proxy behind a **required** access token — those proxy URLs are
+guessable, so the gate is not optional there. Full checklist, security model and
+smoke test: [deploy/runpod/README.md](deploy/runpod/README.md).
+
 ### External tools (install once, connect in Settings)
 
 None of these are bundled — each one is optional, installed separately, and then simply pointed to from the app's Settings page. Features light up automatically once their tool is detected (the "Test" button next to each field tells you immediately whether the app can see it).
