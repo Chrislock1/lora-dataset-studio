@@ -26,7 +26,7 @@ run_step() {
   fi
   log "step $name: starting"
   if ! "$fn"; then
-    die "step $name failed — fix the cause above and re-run setup.sh (completed steps are skipped)"
+    die "step $name failed — fix the cause above and re-run $(basename "${BASH_SOURCE[1]}") (completed steps are skipped)"
   fi
   mkdir -p "$MARKER_DIR"
   touch "$MARKER_DIR/$name.done"
@@ -43,15 +43,15 @@ download_verify() {
       log "already present: $dest"
       return 0
     fi
-    warn "found truncated $dest ($size bytes) — re-downloading"
-    rm -f "$dest"
+    log "resuming partial download: $dest ($size bytes)"
   fi
   mkdir -p "$(dirname "$dest")"
+  rm -f "$dest.aria2"
   if command -v aria2c >/dev/null 2>&1; then
     aria2c -x8 -s8 -c --auto-file-renaming=false --allow-overwrite=true \
-      -d "$(dirname "$dest")" -o "$(basename "$dest")" "$url"
+      -d "$(dirname "$dest")" -o "$(basename "$dest")" "$url" || die "download failed: $url → $dest"
   else
-    curl -fL --retry 3 --retry-delay 5 -C - -o "$dest" "$url"
+    curl -fL --retry 3 --retry-delay 5 -C - -o "$dest" "$url" || die "download failed: $url → $dest"
   fi
   size=$(stat -c%s "$dest")
   [ "$size" -ge "$min_bytes" ] || die "download incomplete: $dest is $size bytes (< $min_bytes)"
