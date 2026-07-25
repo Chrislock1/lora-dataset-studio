@@ -694,6 +694,22 @@ def _apply_sdxl_accelerator(workflow):
 _KREA_DEFAULT_BASE = 'krea2_turbo_fp8.safetensors'
 
 
+def _wired_krea_base_as_listed():
+    """Le UNET câblé du node 20, réécrit dans l'orthographe que ComfyUI liste.
+
+    krea2_turbo.json stocke ce chemin avec un séparateur WINDOWS
+    (``Krea\\krea2_turbo_fp8.safetensors``), mais ComfyUI liste ses modèles avec
+    le séparateur de SON hôte : sur un ComfyUI Linux (pod loué, install docker)
+    la valeur câblée ne correspond à rien et UNETLoader rejette le graphe entier.
+    On apparie donc sur le basename et on rend la chaîne exacte du listing.
+    None quand le défaut n'est pas installé — mieux vaut laisser la valeur câblée
+    et le message de préflight que d'inventer un nom de fichier."""
+    for m in get_krea_models():
+        if _basename(m).lower() == _KREA_DEFAULT_BASE:
+            return m
+    return None
+
+
 def krea_alt_base_models() -> list:
     """Bases Krea locales ALTERNATIVES au UNET câblé du workflow : les checkpoints
     trouvés par get_krea_models() moins le défaut. Vide → aucun choix à offrir
@@ -736,6 +752,10 @@ def apply_krea_lora_test_settings(workflow, *, lora_name, strength, prompt, seed
 
     if base_model:
         _set("20", "unet_name", base_model)
+    else:
+        listed = _wired_krea_base_as_listed()
+        if listed:
+            _set("20", "unet_name", listed)
 
     _set("23", "text", prompt)                    # prompt (CLIPTextEncode Krea)
     _set("25", "width", int(width))

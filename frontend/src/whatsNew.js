@@ -47,6 +47,13 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-25-krea-studio-on-linux-comfyui',
+    date: '2026-07-25',
+    title: '🐧 Krea 2 Test Studio now works on a Linux ComfyUI',
+    blurb:
+      'Running ComfyUI on Linux — a rented pod, a docker install, a home server — and every Krea 2 test render died before it began? The workflow named its base model the Windows way, with a backslash, and a Linux ComfyUI lists that same file with a forward slash, so it matched nothing and the whole graph was rejected. The app now takes the spelling ComfyUI actually reports. Nothing to change on your side, and Windows setups behave exactly as before.',
+  },
+  {
     id: '2026-07-25-identity-prompts-per-subject',
     date: '2026-07-25',
     title: '🐾 Identity prompts no longer leak between subject types',

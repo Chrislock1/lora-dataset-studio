@@ -564,6 +564,41 @@ def test_apply_krea_base_model_sets_node20_and_validates(app):
                                               allowed_bases={base})
 
 
+def test_apply_krea_wired_base_adopts_comfyui_spelling(app, monkeypatch):
+    """Le UNET câblé du node 20 porte un séparateur WINDOWS ; un ComfyUI Linux
+    (pod loué, install docker) liste le même fichier avec '/'. Sans réécriture,
+    UNETLoader ne trouve pas la valeur câblée et rejette tout le graphe."""
+    from app.services import lora_test_studio as lts
+    from app.utils.comfyui import load_workflow_local
+    with app.app_context():
+        lora = 'krea/lora_k_000001000.safetensors'
+        common = dict(lora_name=lora, strength=0.9, prompt='p', seed=1,
+                      width=832, height=1216, allowed_loras={lora})
+        monkeypatch.setattr(lts, 'get_krea_models',
+                            lambda: ['Krea/krea2_turbo_fp8.safetensors'])
+        wf = load_workflow_local(str(lts.WORKFLOW_KREA_TURBO_PATH))
+        assert '\\' in wf['20']['inputs']['unet_name']          # câblé façon Windows
+        lts.apply_krea_lora_test_settings(wf, **common)         # base_model=None
+        assert wf['20']['inputs']['unet_name'] == 'Krea/krea2_turbo_fp8.safetensors'
+
+
+def test_apply_krea_wired_base_untouched_when_not_installed(app, monkeypatch):
+    """Défaut câblé absent du listing → on ne réécrit rien (le préflight Studio
+    signale le modèle manquant ; inventer un nom donnerait une erreur pire)."""
+    from app.services import lora_test_studio as lts
+    from app.utils.comfyui import load_workflow_local
+    with app.app_context():
+        lora = 'krea/lora_k_000001000.safetensors'
+        common = dict(lora_name=lora, strength=0.9, prompt='p', seed=1,
+                      width=832, height=1216, allowed_loras={lora})
+        monkeypatch.setattr(lts, 'get_krea_models',
+                            lambda: ['krea/my_custom_krea.safetensors'])
+        wf = load_workflow_local(str(lts.WORKFLOW_KREA_TURBO_PATH))
+        wired = wf['20']['inputs']['unet_name']
+        lts.apply_krea_lora_test_settings(wf, **common)
+        assert wf['20']['inputs']['unet_name'] == wired
+
+
 def test_krea_alt_base_models_excludes_wired_default(app, monkeypatch):
     """Les listes de bases ALTERNATIVES excluent le UNET câblé du workflow (déjà
     représenté par l'entrée « Official ») — quel que soit son dossier/sa casse."""
