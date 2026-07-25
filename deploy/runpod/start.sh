@@ -11,12 +11,22 @@ source "$SCRIPT_DIR/lib.sh"
   || die "setup has not completed - run $SCRIPT_DIR/setup.sh first"
 mkdir -p "$LOG_DIR"
 
+# LDS_DATA_DIR alone is NOT enough: config.py resolves config.json from
+# LDS_CONFIG and .env from LDS_ENV, each falling back to the REPO root rather
+# than to the data dir. Without these two the app would silently read no config
+# at all -- which means require_token back to its default of false, and a pod
+# open to anyone who can guess the proxy URL. (The Dockerfile pins LDS_CONFIG
+# for the same reason.)
+export LDS_DATA_DIR="$DATA_DIR"
+export LDS_CONFIG="$DATA_DIR/config.json"
+export LDS_ENV="$DATA_DIR/.env"
+
 # --- Access token: mandatory, and it takes BOTH halves.
 # server.require_token in config.json is what makes backend/app/netguard.py
 # check anything at all; this variable supplies the value it checks against.
 # RunPod proxy URLs are derivable from the pod id, so a bind without the gate
 # would hand the internet the datasets, the API keys and the GPU.
-if ! grep -q '"require_token"[[:space:]]*:[[:space:]]*true' "$DATA_DIR/config.json"; then
+if ! grep -q '"require_token"[[:space:]]*:[[:space:]]*true' "$LDS_CONFIG"; then
   die "config.json does not set server.require_token=true - the token gate would
 be inert and this pod is reachable at a guessable public URL. Fix config.json
 (or delete it and re-run setup.sh) before starting."
@@ -84,7 +94,7 @@ supervise ollama "http://127.0.0.1:11434" ollama serve
 supervise comfyui "http://127.0.0.1:8188/system_stats" \
   "$COMFY_DIR/venv/bin/python" "$COMFY_DIR/main.py" --listen 127.0.0.1 --port 8188
 
-export LDS_DATA_DIR="$DATA_DIR" LDS_HOST="0.0.0.0" LDS_PORT="5050"
+export LDS_HOST="0.0.0.0" LDS_PORT="5050"
 supervise studio "http://127.0.0.1:5050/api/health" \
   bash -c "cd '$LDS_DIR' && exec .venv/bin/python backend/run.py"
 
