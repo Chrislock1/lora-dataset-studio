@@ -124,7 +124,7 @@ license has not been accepted on that account. Both are shown by the warning
 | Component | Where | Notes |
 | :-- | :-- | :-- |
 | ComfyUI + `ComfyUI-Conditioning-Rebalance` | `/workspace/ComfyUI` | Own venv, cu128 torch. The node pack publishes `ConditioningKrea2Rebalance`, which the Krea workflow uses. |
-| Krea 2 inference set | `ComfyUI/models/{unet/Krea,text_encoders,vae}` | ~18.5 GB, public download |
+| Krea 2 inference set | `ComfyUI/models/{unet/Krea,text_encoders,vae}` | ~18.5 GB, public download — see the note below |
 | ai-toolkit | `/workspace/ai-toolkit` | Own venv, cu128 torch — the training engine |
 | Ollama + `qwen3-vl-abliterated:8b-instruct` | `/workspace/ollama` | Captioning, framing, watermark detection |
 | The studio | `/workspace/lora-dataset-studio` | Git clone, so in-app "Update & restart" keeps working |
@@ -132,3 +132,16 @@ license has not been accepted on that account. Both are shown by the warning
 
 Not installed here: Klein, Z-Image and SDXL models (generation runs through the
 API engines), and the watermark-inpainting environment (see Troubleshooting).
+
+### About the Krea 2 inference files
+
+The three files come from the public **[`AlperKTS/Krea2_FP8`](https://huggingface.co/AlperKTS/Krea2_FP8)**
+repository — a community **fp8 quantization** of Krea 2 Turbo, not an official
+Krea release. They are used because they carry the exact filenames the app's
+`krea2_turbo.json` workflow loads (`krea2_turbo_fp8.safetensors`,
+`qwen3vl_4b_fp8_scaled.safetensors`, `qwen_image_vae.safetensors`), which is
+also what a Windows install of the app expects. The weights remain subject to
+the Krea 2 licence; review it before use.
+
+**Training** does not use these. ai-toolkit downloads the official gated base
+from Krea's own repository with your `HF_TOKEN` at the first run.
