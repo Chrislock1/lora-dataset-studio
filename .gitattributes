@@ -1,3 +1,7 @@
 # Keep frontend builds reproducible across Linux CI and Windows releases.
 frontend/** text=auto eol=lf
 docs/** text=auto eol=lf
+
+# Shell scripts run on Linux (the RunPod pod). A CRLF checkout on a Windows
+# dev machine would ship "bad interpreter: /usr/bin/env bash^M".
+*.sh text eol=lf
