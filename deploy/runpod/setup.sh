@@ -176,7 +176,18 @@ step_ollama() {
 
 step_studio() {
   if [ ! -d "$LDS_DIR/.git" ]; then
-    git clone https://github.com/perfectgf/lora-dataset-studio.git "$LDS_DIR"
+    # Clone from wherever THIS checkout came from, so a fork provisions itself
+    # instead of silently pulling someone else's code. Normally a no-op: the
+    # documented flow clones into $LDS_DIR and runs this script from there, so
+    # the repo is already present and this branch never runs. LDS_REPO
+    # overrides for anything else.
+    local repo_url="${LDS_REPO:-}"
+    if [ -z "$repo_url" ]; then
+      repo_url="$(git -C "$SCRIPT_DIR" remote get-url origin 2>/dev/null || true)"
+    fi
+    [ -n "$repo_url" ] || { warn "cannot tell which repository to clone - set LDS_REPO"; return 1; }
+    log "cloning the studio from $repo_url"
+    git clone "$repo_url" "$LDS_DIR"
   fi
   if [ ! -x "$LDS_DIR/.venv/bin/python" ]; then
     python3 -m venv "$LDS_DIR/.venv"

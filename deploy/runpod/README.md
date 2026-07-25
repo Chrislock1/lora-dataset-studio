@@ -40,6 +40,12 @@ bash lora-dataset-studio/deploy/runpod/setup.sh
 bash lora-dataset-studio/deploy/runpod/start.sh
 ```
 
+**Running your own fork?** Clone *that* URL instead. The pod runs whatever you
+clone here — `setup.sh` finds the checkout already in place and provisions it as
+is, so your changes are what the pod serves. (If you ever run `setup.sh` from
+somewhere else, it clones from this checkout's own `origin`; `LDS_REPO`
+overrides.)
+
 `setup.sh` takes a while on first run — roughly 19 GB of Krea 2 models, two
 CUDA torch environments and a 7 GB vision model. It is **idempotent**: every
 completed step writes a marker under `/workspace/.lds-setup/` and is skipped on
