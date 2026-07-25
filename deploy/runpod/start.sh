@@ -103,6 +103,10 @@ log "--------------------------------------------------------"
 log "LoRA Dataset Studio is up."
 log "Open:  https://${POD_ID}-5050.proxy.runpod.net/?token=${LDS_ACCESS_TOKEN}"
 log "Logs:  $LOG_DIR/{ollama,comfyui,studio}.log"
+log ""
+log "If that URL hangs or 404s while the studio is up here, port 5050 is not"
+log "exposed on this pod. RunPod only proxies ports declared when the pod is"
+log "created - nothing inside the container can detect or change that."
 log "--------------------------------------------------------"
 
 # A RunPod start command must not exit, or the pod is torn down.
