@@ -77,8 +77,17 @@ step_system_packages() {
     apt-get install -y -qq git curl aria2 python3-venv >/dev/null
   else
     warn "apt-get not found - assuming git/curl/python3-venv are already present"
-    command -v git >/dev/null 2>&1 || { warn "git is missing and cannot be installed here"; return 1; }
   fi
+  # run_step invokes steps from a conditional, which disables `set -e` for this
+  # whole body: a failed install would otherwise fall through and still mark the
+  # step done. Every step therefore ends by verifying its own result.
+  local tool
+  for tool in git curl; do
+    command -v "$tool" >/dev/null 2>&1 || { warn "$tool is missing after install"; return 1; }
+  done
+  python3 -m venv --help >/dev/null 2>&1 || { warn "python3 venv support is missing"; return 1; }
+  command -v aria2c >/dev/null 2>&1 \
+    || warn "aria2c unavailable - downloads fall back to curl (slower, still resumable)"
   return 0
 }
 
@@ -105,7 +114,8 @@ step_comfyui() {
     "$COMFY_DIR/venv/bin/pip" install -r "$pack_dir/requirements.txt"
   fi
 
-  "$COMFY_DIR/venv/bin/python" -c "import torch; assert torch.cuda.is_available(), 'torch sees no CUDA - is the pod image CUDA 12.8+?'"
+  "$COMFY_DIR/venv/bin/python" -c "import torch; assert torch.cuda.is_available(), 'torch sees no CUDA - is the pod image CUDA 12.8+?'" \
+    || { warn "ComfyUI's environment is incomplete or cannot see the GPU"; return 1; }
   return 0
 }
 
@@ -136,6 +146,10 @@ step_aitoolkit() {
   "$AIT_DIR/venv/bin/pip" install torch torchvision torchaudio --index-url "$TORCH_INDEX"
   "$AIT_DIR/venv/bin/pip" install -r "$AIT_DIR/requirements.txt"
   [ -f "$AIT_DIR/run.py" ] || { warn "ai-toolkit clone looks wrong: no run.py"; return 1; }
+  # Verify the venv, not just the clone: a failed pip install would otherwise
+  # leave this step marked done with a trainer that cannot reach the GPU.
+  "$AIT_DIR/venv/bin/python" -c "import torch; assert torch.cuda.is_available(), 'ai-toolkit venv: torch sees no CUDA'" \
+    || { warn "ai-toolkit's environment is incomplete - see the pip output above"; return 1; }
   return 0
 }
 
@@ -181,14 +195,16 @@ step_studio() {
     local ml_filtered="$DATA_DIR/ml-extras-filtered.txt"
     grep -v '^simple-lama-inpainting' "$LDS_DIR/backend/requirements-ml.txt" > "$ml_filtered"
     "$LDS_DIR/.venv/bin/pip" install -r "$ml_filtered" -c "$LDS_DIR/backend/requirements.txt"
-    "$LDS_DIR/.venv/bin/python" -c "import PIL; assert PIL.__version__.startswith('12.'), f'Pillow was downgraded to {PIL.__version__}'"
+    "$LDS_DIR/.venv/bin/python" -c "import PIL; assert PIL.__version__.startswith('12.'), f'Pillow was downgraded to {PIL.__version__}'" \
+      || { warn "the ML extras downgraded Pillow - the app's venv is no longer sound"; return 1; }
   fi
 
   if [ "${INSTALL_SCRAPE_EXTRAS:-0}" = "1" ]; then
     "$LDS_DIR/.venv/bin/pip" install -r "$LDS_DIR/backend/requirements-scrape.txt"
   fi
 
-  "$LDS_DIR/.venv/bin/python" -c "import flask, PIL"
+  "$LDS_DIR/.venv/bin/python" -c "import flask, PIL" \
+    || { warn "the studio's environment is incomplete - see the pip output above"; return 1; }
   return 0
 }
 
