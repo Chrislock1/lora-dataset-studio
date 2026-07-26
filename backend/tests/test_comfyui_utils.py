@@ -2,6 +2,7 @@
 parser (label + group MUST share one parse — the drift-proof invariant),
 config-driven listers (empty/None-safe when ComfyUI isn't configured), and
 the LoRA-chain injectors (allowed-whitelist respected)."""
+import os
 from unittest.mock import MagicMock, patch
 
 from app.utils.comfyui import (
@@ -163,7 +164,10 @@ def test_resolve_checkpoint_ckpt_name_unconfigured_falls_back_to_name(app):
     with app.app_context():
         assert resolve_checkpoint_ckpt_name('foo.safetensors') == 'foo.safetensors'
         assert resolve_checkpoint_ckpt_name('') == ''
-        assert resolve_checkpoint_ckpt_name('sdxl/foo.safetensors') == 'sdxl\\foo.safetensors'
+        # Already a relative path -> normalised to THIS host's separator, so a
+        # Linux ComfyUI is handed 'sdxl/foo…' rather than a backslash it rejects.
+        assert resolve_checkpoint_ckpt_name('sdxl/foo.safetensors') == os.path.join('sdxl', 'foo.safetensors')
+        assert resolve_checkpoint_ckpt_name(r'sdxl\foo.safetensors') == os.path.join('sdxl', 'foo.safetensors')
 
 
 def test_api_address_has_default_even_when_unconfigured(app):
@@ -282,3 +286,69 @@ def test_apply_optimal_sampler_params_uses_code_defaults(app):
         assert inputs["scheduler"] == "ddim_uniform"
         assert inputs["cfg"] == 1.0
         assert inputs["steps"] == 20  # steps intentionally left untouched
+
+
+# --- Model names must use the HOST separator -------------------------------
+# ComfyUI validates a loader's model name against its own listing, which uses
+# the separator of the machine ComfyUI runs on. These names used to be joined
+# with a hardcoded backslash, so every model in a SUBFOLDER was rejected by a
+# Linux ComfyUI with "Value not in list" — the base model and every trained
+# LoRA alike, since training deploys into loras/<family>/.
+
+def test_comfy_rel_normalises_either_separator_to_the_host_one():
+    import os
+    from app.utils.comfyui import _comfy_rel
+    assert _comfy_rel(r'krea\lora_a.safetensors') == os.path.join('krea', 'lora_a.safetensors')
+    assert _comfy_rel('krea/lora_a.safetensors') == os.path.join('krea', 'lora_a.safetensors')
+    assert _comfy_rel('root.safetensors') == 'root.safetensors'
+    assert _comfy_rel('') == ''
+    assert _comfy_rel(None) == ''
+
+
+def _seed(tmp_path, rel_parts):
+    """Create models/<...>/file and return the models root."""
+    target = tmp_path.joinpath(*rel_parts)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b'0')
+    return target
+
+
+def test_get_krea_loras_emits_host_separator(app, tmp_path, monkeypatch):
+    import os
+    from app.utils import comfyui
+    lora_dir = tmp_path / 'models' / 'loras'
+    _seed(tmp_path, ('models', 'loras', 'krea', 'lora_Lola_000001000.safetensors'))
+    monkeypatch.setattr(comfyui, '_lora_dir', lambda: str(lora_dir))
+    with app.app_context():
+        names = [e['filename'] for e in comfyui.get_krea_loras()]
+    assert names == [os.path.join('krea', 'lora_Lola_000001000.safetensors')]
+    if os.sep == '/':
+        assert chr(92) not in names[0]   # a Linux ComfyUI would reject a backslash
+
+
+def test_get_krea_models_emits_host_separator(app, tmp_path, monkeypatch):
+    import os
+    from app.utils import comfyui
+    _seed(tmp_path, ('models', 'unet', 'Krea', 'krea2_turbo_fp8.safetensors'))
+    (tmp_path / 'output').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(comfyui, '_out_dir', lambda: str(tmp_path / 'output'))
+    comfyui._krea_models_cache['data'] = None
+    comfyui._krea_models_cache['timestamp'] = 0
+    with app.app_context():
+        names = comfyui.get_krea_models()
+    comfyui._krea_models_cache['data'] = None
+    assert os.path.join('Krea', 'krea2_turbo_fp8.safetensors') in names
+
+
+def test_get_zimage_models_emits_host_separator(app, tmp_path, monkeypatch):
+    import os
+    from app.utils import comfyui
+    _seed(tmp_path, ('models', 'unet', 'z image', 'bigLove_zt3.safetensors'))
+    (tmp_path / 'output').mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(comfyui, '_out_dir', lambda: str(tmp_path / 'output'))
+    comfyui._zimage_models_cache['data'] = None
+    comfyui._zimage_models_cache['timestamp'] = 0
+    with app.app_context():
+        names = comfyui.get_zimage_models()
+    comfyui._zimage_models_cache['data'] = None
+    assert names == [os.path.join('z image', 'bigLove_zt3.safetensors')]

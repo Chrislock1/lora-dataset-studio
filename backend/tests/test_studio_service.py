@@ -582,6 +582,22 @@ def test_apply_krea_wired_base_adopts_comfyui_spelling(app, monkeypatch):
         assert wf['20']['inputs']['unet_name'] == 'Krea/krea2_turbo_fp8.safetensors'
 
 
+def test_apply_krea_wired_base_adopts_a_root_level_install(app, monkeypatch):
+    """Défaut installé À LA RACINE de models/unet : ComfyUI le liste sans dossier
+    ('krea2_turbo_fp8.safetensors'), donc le node 20 doit porter CE nom — sinon
+    le graphe part avec 'Krea\\...' et ComfyUI répond « Value not in list »."""
+    from app.services import lora_test_studio as lts
+    from app.utils.comfyui import load_workflow_local
+    with app.app_context():
+        lora = 'krea/lora_k_000001000.safetensors'
+        common = dict(lora_name=lora, strength=0.9, prompt='p', seed=1,
+                      width=832, height=1216, allowed_loras={lora})
+        monkeypatch.setattr(lts, 'get_krea_models', lambda: ['krea2_turbo_fp8.safetensors'])
+        wf = load_workflow_local(str(lts.WORKFLOW_KREA_TURBO_PATH))
+        lts.apply_krea_lora_test_settings(wf, **common)
+        assert wf['20']['inputs']['unet_name'] == 'krea2_turbo_fp8.safetensors'
+
+
 def test_apply_krea_wired_base_untouched_when_not_installed(app, monkeypatch):
     """Défaut câblé absent du listing → on ne réécrit rien (le préflight Studio
     signale le modèle manquant ; inventer un nom donnerait une erreur pire)."""

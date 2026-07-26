@@ -47,6 +47,13 @@ import { WORKSPACE_SECTIONS } from './components/dataset/workspaceSections.js';
 // Newest first. Prepend new waves at the top.
 export const WHATS_NEW = [
   {
+    id: '2026-07-26-linux-comfyui-model-folders',
+    date: '2026-07-26',
+    title: '🐧 Models in sub-folders now work on a Linux ComfyUI',
+    blurb:
+      'If your ComfyUI runs on Linux — a rented pod, a docker install, a home server — anything filed in a sub-folder was unusable: your trained LoRAs land in loras/krea, loras/sdxl or loras/z image, and every test render came back "Value not in list". The app was naming those files the Windows way, with a backslash, which a Linux ComfyUI never matches. It now uses the separator of the machine ComfyUI is actually running on, so base models and trained LoRAs both load. Windows setups are unaffected.',
+  },
+  {
     id: '2026-07-25-krea-studio-on-linux-comfyui',
     date: '2026-07-25',
     title: '🐧 Krea 2 Test Studio now works on a Linux ComfyUI',

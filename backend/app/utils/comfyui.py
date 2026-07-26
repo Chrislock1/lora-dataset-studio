@@ -1046,6 +1046,23 @@ def get_checkpoint_models(include_hidden=False):
         return []
 
 
+def _comfy_rel(path) -> str:
+    """A model name in the form ComfyUI's loaders accept ON THIS HOST.
+
+    ComfyUI validates ``unet_name`` / ``lora_name`` / ``ckpt_name`` against its
+    own listing, which is built with the separator of the machine ComfyUI runs
+    on. These names were historically joined with a hardcoded backslash: right
+    on Windows, and rejected outright by a Linux ComfyUI ("Value not in list")
+    for EVERY model in a subfolder — the base model and every trained LoRA
+    alike, since training deploys into ``loras/<family>/``.
+
+    Normalising to ``os.sep`` is a no-op on Windows (``os.path.join`` already
+    produces backslashes there) and correct on Linux. Both separators are
+    accepted on input, so a value persisted by an earlier Windows run still
+    resolves."""
+    return (path or '').replace('\\', os.sep).replace('/', os.sep)
+
+
 def resolve_checkpoint_ckpt_name(name):
     """Map a checkpoint BASENAME (as returned by get_checkpoint_models, which strips
     the folder via os.path.basename) to the path RELATIVE to models/checkpoints that
@@ -1058,7 +1075,7 @@ def resolve_checkpoint_ckpt_name(name):
     if not name:
         return name
     if "\\" in name or "/" in name:
-        return name.replace("/", "\\")
+        return _comfy_rel(name)
     out_dir = _out_dir()
     if not out_dir:
         return name
@@ -1067,7 +1084,7 @@ def resolve_checkpoint_ckpt_name(name):
         for root, _dirs, files in os.walk(ck_dir):
             if name in files:
                 rel = os.path.relpath(os.path.join(root, name), ck_dir)
-                return rel.replace("/", "\\")
+                return _comfy_rel(rel)
     except OSError:
         pass
     return name
@@ -1103,7 +1120,7 @@ def get_zimage_models():
                     for f in files:
                         if f.lower().endswith((".safetensors", ".gguf", ".sft")):
                             rel = f if rel_dir == "." else os.path.join(rel_dir, f)
-                            out.append(rel.replace("/", "\\"))
+                            out.append(_comfy_rel(rel))
             out = sorted(set(out))
         except Exception as e:
             logger.error(f"get_zimage_models error: {e}")
@@ -1143,7 +1160,7 @@ def get_krea_models():
                         continue
                     for f in files:
                         if f.lower().endswith((".safetensors", ".gguf", ".sft")):
-                            out.append(os.path.join(rel_dir, f).replace("/", "\\"))
+                            out.append(_comfy_rel(os.path.join(rel_dir, f)))
             out = sorted(set(out))
         except Exception as e:
             logger.error(f"get_krea_models error: {e}")
@@ -1186,7 +1203,7 @@ def get_zimage_loras():
                 for f in sorted(files):
                     if not f.lower().endswith(".safetensors"):
                         continue
-                    rel = (f if rel_dir == "." else os.path.join(rel_dir, f)).replace("/", "\\")
+                    rel = _comfy_rel(f if rel_dir == "." else os.path.join(rel_dir, f))
                     triggers = _extract_klein_triggers(f)
                     grp, stp = trained_lora_group(f, 'zimage')
                     out.append({
@@ -1223,7 +1240,7 @@ def get_sdxl_loras():
                 for f in sorted(files):
                     if not f.lower().endswith(".safetensors"):
                         continue
-                    rel = (f if rel_dir == "." else os.path.join(rel_dir, f)).replace("/", "\\")
+                    rel = _comfy_rel(f if rel_dir == "." else os.path.join(rel_dir, f))
                     triggers = _extract_klein_triggers(f)
                     grp, stp = trained_lora_group(f, 'sdxl')
                     out.append({
@@ -1261,7 +1278,7 @@ def get_krea_loras():
                 for f in sorted(files):
                     if not f.lower().endswith(".safetensors"):
                         continue
-                    rel = (f if rel_dir == "." else os.path.join(rel_dir, f)).replace("/", "\\")
+                    rel = _comfy_rel(f if rel_dir == "." else os.path.join(rel_dir, f))
                     triggers = _extract_klein_triggers(f)
                     grp, stp = trained_lora_group(f, 'krea')
                     out.append({
