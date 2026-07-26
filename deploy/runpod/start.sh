@@ -7,6 +7,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
+# The one port RunPod proxies. Everything else stays on loopback.
+STUDIO_PORT=5050
+
 [ -f "$MARKER_DIR/seed_config.done" ] \
   || die "setup has not completed - run $SCRIPT_DIR/setup.sh first"
 mkdir -p "$LOG_DIR"
@@ -42,6 +45,37 @@ fi
 chmod 600 "$TOKEN_FILE"
 LDS_ACCESS_TOKEN="$(cat "$TOKEN_FILE")"
 export LDS_ACCESS_TOKEN
+
+# --- Detached mode: survive the terminal closing.
+# A web terminal that disconnects sends SIGHUP to its foreground process group,
+# which otherwise takes all three services down with it. Everything above this
+# point runs in the foreground on purpose, so a bad config or a missing setup
+# still reports itself where you can see it; only the long-running part detaches.
+if [ "${1:-}" = "--detach" ] && [ -z "${LDS_DETACHED:-}" ]; then
+  if wait_http "http://127.0.0.1:$STUDIO_PORT/api/health" 1 2>/dev/null; then
+    die "the studio is already answering on port $STUDIO_PORT - stop it before starting another"
+  fi
+  # setsid detaches into a new session with no controlling terminal, so SIGHUP
+  # is never delivered at all; nohup alone only ignores it.
+  launcher="setsid"
+  command -v setsid >/dev/null 2>&1 || launcher="nohup"
+  LDS_DETACHED=1 $launcher bash "$SCRIPT_DIR/start.sh" \
+    >> "$LOG_DIR/start.log" 2>&1 < /dev/null &
+  disown 2>/dev/null || true
+  log "starting in the background - full log: $LOG_DIR/start.log"
+  if wait_http "http://127.0.0.1:$STUDIO_PORT/api/health" 600; then
+    POD_ID="${RUNPOD_POD_ID:-<pod-id>}"
+    log "--------------------------------------------------------"
+    log "LoRA Dataset Studio is up and will survive this terminal closing."
+    log "Open:  https://${POD_ID}-${STUDIO_PORT}.proxy.runpod.net/?token=${LDS_ACCESS_TOKEN}"
+    log "Stop:  $SCRIPT_DIR/stop.sh"
+    log "--------------------------------------------------------"
+  else
+    warn "not answering yet after 600s - it may still be loading models."
+    warn "Watch it with: tail -f $LOG_DIR/start.log"
+  fi
+  exit 0
+fi
 
 # Supervisor subshell PIDs, so a failed start tears its siblings down instead of
 # orphaning them on 11434/8188 where the next run collides with them.
@@ -94,17 +128,17 @@ supervise ollama "http://127.0.0.1:11434" ollama serve
 supervise comfyui "http://127.0.0.1:8188/system_stats" \
   "$COMFY_DIR/venv/bin/python" "$COMFY_DIR/main.py" --listen 127.0.0.1 --port 8188
 
-export LDS_HOST="0.0.0.0" LDS_PORT="5050"
-supervise studio "http://127.0.0.1:5050/api/health" \
+export LDS_HOST="0.0.0.0" LDS_PORT="$STUDIO_PORT"
+supervise studio "http://127.0.0.1:$STUDIO_PORT/api/health" \
   bash -c "cd '$LDS_DIR' && exec .venv/bin/python backend/run.py"
 
 POD_ID="${RUNPOD_POD_ID:-<pod-id>}"
 log "--------------------------------------------------------"
 log "LoRA Dataset Studio is up."
-log "Open:  https://${POD_ID}-5050.proxy.runpod.net/?token=${LDS_ACCESS_TOKEN}"
+log "Open:  https://${POD_ID}-${STUDIO_PORT}.proxy.runpod.net/?token=${LDS_ACCESS_TOKEN}"
 log "Logs:  $LOG_DIR/{ollama,comfyui,studio}.log"
 log ""
-log "If that URL hangs or 404s while the studio is up here, port 5050 is not"
+log "If that URL hangs or 404s while the studio is up here, port $STUDIO_PORT is not"
 log "exposed on this pod. RunPod only proxies ports declared when the pod is"
 log "created - nothing inside the container can detect or change that."
 log "--------------------------------------------------------"

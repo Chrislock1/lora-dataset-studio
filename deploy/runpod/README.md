@@ -52,6 +52,22 @@ completed step writes a marker under `/workspace/.lds-setup/` and is skipped on
 re-run, so an interrupted setup resumes where it stopped rather than starting
 over.
 
+**Keep it running after you close the terminal.** RunPod's web terminal sends
+SIGHUP to whatever it was running when the connection drops, which would take
+all three services with it. Use `--detach`:
+
+```bash
+bash lora-dataset-studio/deploy/runpod/start.sh --detach
+```
+
+It runs the checks in the foreground so a bad config still reports itself where
+you can see it, then moves the services into their own session — no controlling
+terminal, so the hangup never reaches them — waits for the studio to answer, and
+prints the URL. Stop them again with `deploy/runpod/stop.sh`.
+
+Without `--detach` the script stays in the foreground, which is what you want
+when it is the pod's start command.
+
 `start.sh` prints the URL to open, with the access token already in it:
 
 ```
