@@ -56,16 +56,48 @@ step_preflight() {
   # is needed at TRAINING time, when ai-toolkit pulls the gated base. Warn, so a
   # missing token surfaces now rather than an hour into a paid pod.
   if [ -z "${HF_TOKEN:-}" ]; then
+    # A near-miss name is the likeliest reason someone who "set their token"
+    # still gets a 401: nothing reads these, and the failure only surfaces much
+    # later as a refused download.
+    local alias_name
+    for alias_name in HF_KEY HF_API_KEY HUGGINGFACE_TOKEN HUGGINGFACE_API_KEY \
+                      HUGGING_FACE_HUB_TOKEN HF_ACCESS_TOKEN; do
+      if [ -n "${!alias_name:-}" ]; then
+        warn "found \$$alias_name set, but the variable that is read is HF_TOKEN."
+        warn "Nothing reads \$$alias_name - rename it to HF_TOKEN."
+      fi
+    done
     warn "HF_TOKEN is not set. Setup will finish, but TRAINING will fail:"
     warn "ai-toolkit must download the gated krea/Krea-2-Raw base."
     warn "Set HF_TOKEN as a pod env var and accept the license at"
     warn "https://huggingface.co/krea/Krea-2-Raw"
-  elif curl -fsS -m 10 -H "Authorization: Bearer $HF_TOKEN" \
-      "https://huggingface.co/api/models/krea/Krea-2-Raw" -o /dev/null 2>/dev/null; then
-    log "HF_TOKEN can read the gated Krea-2-Raw training base"
   else
-    warn "HF_TOKEN cannot read krea/Krea-2-Raw - accept the license at"
-    warn "https://huggingface.co/krea/Krea-2-Raw or training will fail at base download."
+    # 401 and 403 fail for completely different reasons and need different
+    # fixes, so report the distinction instead of always blaming the licence.
+    local code account
+    # Probe a FILE, not the model metadata: /api/models/<repo> and its /tree
+    # both answer 200 for this repo with no token at all, so either would report
+    # a green light for a garbage token. Only resolving actual content reflects
+    # whether the gate is open. 302 = redirect to the CDN, i.e. authorised.
+    code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 \
+      -H "Authorization: Bearer $HF_TOKEN" \
+      "https://huggingface.co/krea/Krea-2-Raw/resolve/main/model_index.json" 2>/dev/null || echo 000)
+    case "$code" in
+      200|302) log "HF_TOKEN can download the gated Krea-2-Raw training base" ;;
+      401) warn "Hugging Face rejected HF_TOKEN (401). The token is wrong, expired or revoked." ;;
+      403)
+        account=$(curl -s -m 15 -H "Authorization: Bearer $HF_TOKEN" \
+          "https://huggingface.co/api/whoami-v2" 2>/dev/null \
+          | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        warn "The token is valid but cannot read krea/Krea-2-Raw (403). Two causes:"
+        warn "  1. the licence was accepted on a DIFFERENT account than this token's${account:+ (this token is '$account')}"
+        warn "  2. a fine-grained token needs 'Read access to contents of all public"
+        warn "     gated repos you can access' ticked - a plain read token lacks it"
+        warn "Accept at https://huggingface.co/krea/Krea-2-Raw, or reissue the token."
+        ;;
+      000) warn "could not reach huggingface.co to check HF_TOKEN - skipping this check" ;;
+      *)   warn "unexpected reply $code checking HF_TOKEN against krea/Krea-2-Raw" ;;
+    esac
   fi
   return 0
 }
