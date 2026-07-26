@@ -74,7 +74,9 @@ step_system_packages() {
   if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq git curl aria2 python3-venv >/dev/null
+    # zstd: Ollama's installer unpacks a zstd archive and the stock RunPod
+    # images do not carry it.
+    apt-get install -y -qq git curl aria2 zstd python3-venv >/dev/null
   else
     warn "apt-get not found - assuming git/curl/python3-venv are already present"
   fi
@@ -153,10 +155,33 @@ step_aitoolkit() {
   return 0
 }
 
+# Ollama's installer unpacks a zstd archive. Installed here rather than relying
+# on step_system_packages: anyone who provisioned before zstd was added to that
+# list already carries its completion marker, so that step will never re-run for
+# them. A dependency belongs to the step that needs it.
+_ensure_zstd() {
+  command -v zstd >/dev/null 2>&1 && return 0
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get install -y -qq zstd >/dev/null 2>&1 \
+      || { apt-get update -qq && apt-get install -y -qq zstd >/dev/null 2>&1; } \
+      || true
+  fi
+  command -v zstd >/dev/null 2>&1 \
+    || { warn "zstd is needed to unpack Ollama's installer and could not be installed"; return 1; }
+}
+
 step_ollama() {
   if ! command -v ollama >/dev/null 2>&1; then
-    curl -fsSL https://ollama.com/install.sh | sh
+    _ensure_zstd || return 1
+    curl -fsSL https://ollama.com/install.sh | sh \
+      || { warn "the Ollama installer failed - see its output above"; return 1; }
   fi
+  # Fail here rather than spend 60s waiting on a server that cannot exist: the
+  # installer reports its own errors and then exits, and a missing binary used
+  # to surface only as an unexplained health-check timeout.
+  command -v ollama >/dev/null 2>&1 \
+    || { warn "ollama is still not on PATH after installing"; return 1; }
   mkdir -p "$OLLAMA_MODELS_DIR"
   # Serve just long enough to pull the vision model onto the network volume;
   # start.sh owns the long-running server.
