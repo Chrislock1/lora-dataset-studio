@@ -72,6 +72,23 @@ step_preflight() {
     warn "Set HF_TOKEN as a pod env var and accept the license at"
     warn "https://huggingface.co/krea/Krea-2-Raw"
   else
+    # Shape first, network second: a double-paste is a 401 like any other bad
+    # token, and no amount of licence-accepting fixes it. Checked without ever
+    # printing the value.
+    local prefixes
+    prefixes=$(printf '%s' "$HF_TOKEN" | grep -o 'hf_' | wc -l | tr -d ' ')
+    if [ "${prefixes:-0}" -gt 1 ]; then
+      warn "HF_TOKEN carries the 'hf_' prefix $prefixes times - it looks pasted more"
+      warn "than once (${#HF_TOKEN} characters; a Hugging Face token is about 37)."
+      warn "Re-enter it once, in the pod's env var AND in $DATA_DIR/.env"
+      return 1
+    fi
+    case "$HF_TOKEN" in
+      *[[:space:]]*|\"*|\'*)
+        warn "HF_TOKEN contains whitespace or quote characters - paste the bare token."
+        return 1 ;;
+    esac
+
     # 401 and 403 fail for completely different reasons and need different
     # fixes, so report the distinction instead of always blaming the licence.
     local code account
