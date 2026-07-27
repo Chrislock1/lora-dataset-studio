@@ -121,6 +121,23 @@ supervise() {
   log "$name is up"
 }
 
+# Fail fast on a fresh container disk. /workspace survives a new pod, but apt
+# packages and Ollama's /usr/local binary do not - and the completion markers for
+# those used to live on the volume, so setup would report "already done" while
+# the binaries were gone. Without this check the first casualty is a 180s health
+# timeout that blames the service instead of naming the cause.
+missing=""
+command -v ollama >/dev/null 2>&1 || missing="$missing ollama"
+[ -x "$COMFY_DIR/venv/bin/python" ] || missing="$missing ComfyUI's venv"
+[ -x "$LDS_DIR/.venv/bin/python" ] || missing="$missing the studio's venv"
+if [ -n "$missing" ]; then
+  warn "missing on this pod:$missing"
+  warn "The network volume is intact, but this container's disk is fresh, so"
+  warn "anything installed outside /workspace (apt packages, Ollama's binary in"
+  warn "/usr/local) is gone with the previous pod."
+  die "Re-run $SCRIPT_DIR/setup.sh - it reinstalls only those, and keeps the models."
+fi
+
 export OLLAMA_MODELS="$OLLAMA_MODELS_DIR"
 export OLLAMA_HOST="127.0.0.1:11434"
 supervise ollama "http://127.0.0.1:11434" ollama serve

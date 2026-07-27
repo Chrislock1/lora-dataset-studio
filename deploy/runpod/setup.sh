@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 # One-time provisioning of a RunPod pod for LoRA Dataset Studio + ComfyUI +
-# ai-toolkit + Ollama (Krea 2 profile). Idempotent: each completed step writes
-# a marker under /workspace/.lds-setup and is skipped on re-run. Delete a
-# marker to redo just that step.
+# ai-toolkit + Ollama (Krea 2 profile). Idempotent: each completed step writes a
+# marker and is skipped on re-run; delete a marker to redo just that step.
+#
+# Markers live in one of two places, by what the step installs:
+#   /workspace/.lds-setup  - on the network volume, for things installed into
+#                            /workspace (venvs, models). Survives a new pod.
+#   /var/lib/lds-setup     - on the container disk, for apt packages and
+#                            Ollama's binary in /usr/local. A new pod on the
+#                            same volume redoes exactly these - a couple of
+#                            minutes, and no model is downloaded twice.
 #
 # Flags (env vars): INSTALL_ML_EXTRAS=0     skip the ML extras (default: install)
 #                   INSTALL_SCRAPE_EXTRAS=1 add the scraper extras (default: skip)
@@ -339,11 +346,15 @@ EOF
 main() {
   log "LoRA Dataset Studio - RunPod provisioning"
   run_step preflight step_preflight
-  run_step system_packages step_system_packages
+  # container scope: apt installs land on the container disk, so a new pod on
+  # the same volume must redo them.
+  run_step system_packages step_system_packages container
   run_step comfyui step_comfyui
   run_step krea_models step_krea_models
   run_step aitoolkit step_aitoolkit
-  run_step ollama step_ollama
+  # container scope: the installer puts the binary in /usr/local, which is the
+  # container disk. Only its MODELS live on the volume.
+  run_step ollama step_ollama container
   run_step studio step_studio
   run_step seed_config step_seed_config
   log "setup complete - run $SCRIPT_DIR/start.sh next"

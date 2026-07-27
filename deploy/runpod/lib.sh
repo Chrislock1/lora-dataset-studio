@@ -4,7 +4,16 @@
 # survives pod stop/restart and pod re-creation on the same volume.
 
 WORKSPACE="${WORKSPACE:-/workspace}"
+# Two marker scopes, because two different things can be "already installed".
+#   MARKER_DIR           - on the network volume: survives pod re-creation, for
+#                          anything installed INTO /workspace (venvs, models).
+#   CONTAINER_MARKER_DIR - on the container disk: dies with the pod, for apt
+#                          packages and Ollama's binary in /usr/local.
+# Recording a container-disk install on the volume is the trap: a new pod on the
+# same volume then skips a step whose files are gone, and start.sh hangs on a
+# binary that no longer exists.
 MARKER_DIR="$WORKSPACE/.lds-setup"
+CONTAINER_MARKER_DIR="${CONTAINER_MARKER_DIR:-/var/lib/lds-setup}"
 DATA_DIR="$WORKSPACE/lds-data"
 LOG_DIR="$DATA_DIR/logs"
 COMFY_DIR="$WORKSPACE/ComfyUI"
@@ -16,12 +25,18 @@ log()  { printf '\033[1;36m[lds]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[lds] WARNING:\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[lds] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# run_step <name> <fn>: skip when the step's marker exists; run <fn> and write
-# the marker on success. A failed step names itself and how to retry, then dies.
+# run_step <name> <fn> [scope]: skip when the step's marker exists; run <fn> and
+# write the marker on success. A failed step names itself and how to retry, then
+# dies. scope is 'volume' (default) or 'container' - see the marker dirs above.
 run_step() {
-  local name="$1" fn="$2"
-  if [ -f "$MARKER_DIR/$name.done" ]; then
-    log "step $name: already done (rm $MARKER_DIR/$name.done to redo)"
+  local name="$1" fn="$2" scope="${3:-volume}" dir="$MARKER_DIR"
+  if [ "$scope" = "container" ]; then
+    dir="$CONTAINER_MARKER_DIR"
+    # A writable fallback matters: some images mount /var read-only.
+    mkdir -p "$dir" 2>/dev/null || dir="/tmp/lds-setup"
+  fi
+  if [ -f "$dir/$name.done" ]; then
+    log "step $name: already done (rm $dir/$name.done to redo)"
     return 0
   fi
   log "step $name: starting"
@@ -30,8 +45,8 @@ run_step() {
     # names the script the operator actually ran. Defaulted for `set -u`.
     die "step $name failed - fix the cause above and re-run $(basename "${BASH_SOURCE[1]:-this script}") (completed steps are skipped)"
   fi
-  mkdir -p "$MARKER_DIR"
-  touch "$MARKER_DIR/$name.done"
+  mkdir -p "$dir"
+  touch "$dir/$name.done"
   log "step $name: done"
 }
 

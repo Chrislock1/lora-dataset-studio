@@ -108,7 +108,28 @@ Work through this once on a fresh pod:
    then stop it. The first run additionally downloads the ~24 GB gated base
    into `/workspace/hf-home`; the volume keeps it for later runs.
 
-## 5. Repairing or re-running a step
+## 5. Starting a new pod on the same volume
+
+This works, and it skips the expensive parts — but it is **not** a no-op. The
+network volume keeps the venvs, the models and your data; the container disk
+does not, so anything installed outside `/workspace` is gone with the old pod:
+the apt packages and Ollama's binary in `/usr/local`.
+
+So on a fresh pod, just run setup again first:
+
+```bash
+bash /workspace/lora-dataset-studio/deploy/runpod/setup.sh
+bash /workspace/lora-dataset-studio/deploy/runpod/start.sh --detach
+```
+
+It redoes only those two steps — a couple of minutes, and not a single model is
+downloaded again. That is why markers live in two places: `/workspace/.lds-setup`
+for what the volume keeps, `/var/lib/lds-setup` for what dies with the pod.
+
+If you skip setup, `start.sh` says what is missing and stops, rather than
+hanging on a health check for a binary that no longer exists.
+
+## 6. Repairing or re-running a step
 
 Each step's marker lives in `/workspace/.lds-setup/`. Delete one and re-run
 `setup.sh` to redo just that step:
@@ -120,7 +141,7 @@ bash /workspace/lora-dataset-studio/deploy/runpod/setup.sh
 
 Interrupted model downloads resume rather than restart.
 
-## 6. Troubleshooting
+## 7. Troubleshooting
 
 **A service does not come up.** `start.sh` prints the tail of the offending
 log and names it. Full logs: `/workspace/lds-data/logs/{ollama,comfyui,studio}.log`.
